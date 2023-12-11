@@ -9,30 +9,32 @@ Feature: IMAP copy messages
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
       | jane.doe@mail.com | name@[domain]        | bar     | true   |
-    And bridge starts
+    Then it succeeds
+    When bridge starts
     And the user logs in with username "[user:user]" and password "password"
     And user "[user:user]" finishes syncing
     And user "[user:user]" connects and authenticates IMAP client "1"
+    Then it succeeds
 
   Scenario: Copy message to label
     When IMAP client "1" copies the message with subject "foo" from "INBOX" to "Labels/label"
     And it succeeds
-    Then IMAP client "1" sees the following messages in "INBOX":
+    Then IMAP client "1" eventually sees the following messages in "INBOX":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
       | jane.doe@mail.com | name@[domain]        | bar     | true   |
-    And IMAP client "1" sees the following messages in "Labels/label":
+    And IMAP client "1" eventually sees the following messages in "Labels/label":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
 
   Scenario: Copy all messages to label
     When IMAP client "1" copies all messages from "INBOX" to "Labels/label"
     And it succeeds
-    Then IMAP client "1" sees the following messages in "INBOX":
+    Then IMAP client "1" eventually sees the following messages in "INBOX":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
       | jane.doe@mail.com | name@[domain]        | bar     | true   |
-    And IMAP client "1" sees the following messages in "Labels/label":
+    And IMAP client "1" eventually sees the following messages in "Labels/label":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
       | jane.doe@mail.com | name@[domain]        | bar     | true   |
@@ -43,14 +45,14 @@ Feature: IMAP copy messages
     Then IMAP client "1" eventually sees the following messages in "INBOX":
       | from              | to            | subject | unread |
       | jane.doe@mail.com | name@[domain] | bar     | true   |
-    And IMAP client "1" sees the following messages in "Folders/mbox":
+    And IMAP client "1" eventually sees the following messages in "Folders/mbox":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
 
   Scenario: Copy all messages to folder does move
     When IMAP client "1" copies all messages from "INBOX" to "Folders/mbox"
     And it succeeds
-    Then IMAP client "1" sees the following messages in "Folders/mbox":
+    Then IMAP client "1" eventually sees the following messages in "Folders/mbox":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
       | jane.doe@mail.com | name@[domain]        | bar     | true   |
@@ -66,20 +68,35 @@ Feature: IMAP copy messages
     And IMAP client "1" eventually sees 0 messages in "Sent"
 
   Scenario: Copy message from All mail moves from the original location
-    Then IMAP client "1" sees the following messages in "INBOX":
+    Given IMAP client "1" eventually sees the following messages in "INBOX":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
       | jane.doe@mail.com | name@[domain]        | bar     | true   |
     When IMAP client "1" copies the message with subject "foo" from "All Mail" to "Folders/mbox"
     And it succeeds
-    Then IMAP client "1" sees the following messages in "INBOX":
-      | from              | to                   | subject | unread |
-      | jane.doe@mail.com | name@[domain]        | bar     | true   |
-    Then IMAP client "1" sees the following messages in "All Mail":
+    Then IMAP client "1" eventually sees the following messages in "INBOX":
+      | from              | to            | subject | unread |
+      | jane.doe@mail.com | name@[domain] | bar     | true   |
+    And IMAP client "1" eventually sees the following messages in "All Mail":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
       | jane.doe@mail.com | name@[domain]        | bar     | true   |
-    Then IMAP client "1" sees the following messages in "Folders/mbox":
+    And IMAP client "1" eventually sees the following messages in "Folders/mbox":
       | from              | to                   | subject | unread |
       | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
 
+  Scenario: Move message to trash then copy to folder does not delete message
+    When IMAP client "1" moves the message with subject "foo" from "INBOX" to "Trash"
+    And it succeeds
+    Then IMAP client "1" eventually sees the following messages in "Trash":
+      | from              | to                   | subject | unread |
+      | john.doe@mail.com | [user:user]@[domain] | foo     | false  |
+    When IMAP client "1" copies the message with subject "foo" from "Trash" to "Folders/mbox"
+    And it succeeds
+    When IMAP client "1" marks the message with subject "foo" as deleted
+    Then it succeeds
+    When IMAP client "1" expunges
+    Then it succeeds
+    Then IMAP client "1" eventually sees the following messages in "Folders/mbox":
+      | from              | to                   | subject | unread |
+      | john.doe@mail.com | [user:user]@[domain] | foo     | false  |

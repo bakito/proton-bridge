@@ -23,6 +23,7 @@ import (
 	"runtime"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/gluon/imap"
 	"github.com/ProtonMail/go-autostart"
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
@@ -36,17 +37,16 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/useragent"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/ProtonMail/proton-bridge/v3/internal/versioner"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
 
-const vaultSecretName = "bridge-vault-key"
-
 // deleteOldGoIMAPFiles Set with `-ldflags -X app.deleteOldGoIMAPFiles=true` to enable cleanup of old imap cache data.
 var deleteOldGoIMAPFiles bool //nolint:gochecknoglobals
 
-// withBridge creates creates and tears down the bridge.
-func withBridge( //nolint:funlen
+// withBridge creates and tears down the bridge.
+func withBridge(
 	c *cli.Context,
 	exe string,
 	locations *locations.Locations,
@@ -56,6 +56,7 @@ func withBridge( //nolint:funlen
 	reporter *sentry.Reporter,
 	vault *vault.Vault,
 	cookieJar http.CookieJar,
+	keychains *keychain.List,
 	fn func(*bridge.Bridge, <-chan events.Event) error,
 ) error {
 	logrus.Debug("Creating bridge")
@@ -79,7 +80,7 @@ func withBridge( //nolint:funlen
 	)
 
 	// Create a proxy dialer which switches to a proxy if the request fails.
-	proxyDialer := dialer.NewProxyTLSDialer(pinningDialer, constants.APIHost)
+	proxyDialer := dialer.NewProxyTLSDialer(pinningDialer, constants.APIHost, crashHandler)
 
 	// Create the autostarter.
 	autostarter := newAutostarter(exe)
@@ -98,6 +99,7 @@ func withBridge( //nolint:funlen
 		autostarter,
 		updater,
 		version,
+		keychains,
 
 		// The API stuff.
 		constants.APIHost,
@@ -110,6 +112,8 @@ func withBridge( //nolint:funlen
 		// Crash and report stuff
 		crashHandler,
 		reporter,
+		imap.DefaultEpochUIDValidityGenerator(),
+		nil,
 
 		// The logging stuff.
 		c.String(flagLogIMAP) == "client" || c.String(flagLogIMAP) == "all",
@@ -155,7 +159,7 @@ func newUpdater(locations *locations.Locations) (*updater.Updater, error) {
 	}
 
 	return updater.NewUpdater(
-		updater.NewInstaller(versioner.New(updatesDir)),
+		versioner.New(updatesDir),
 		verifier,
 		constants.UpdateName,
 		runtime.GOOS,

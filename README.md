@@ -1,5 +1,5 @@
 # Proton Mail Bridge and Import Export app
-Copyright (c) 2022 Proton AG
+Copyright (c) 2023 Proton AG
 
 This repository holds the Proton Mail Bridge and the Proton Mail Import-Export applications.
 For a detailed build information see [BUILDS](./BUILDS.md).
@@ -48,9 +48,6 @@ major problems.
 
 ## Environment Variables
 
-### Bridge application
-- `BRIDGESTRICTMODE`: tells bridge to turn on `bbolt`'s "strict mode" which checks the database after every `Commit`. Set to `1` to enable.
-
 ### Dev build or run
 - `APP_VERSION`: set the bridge app version used during testing or building
 - `PROTONMAIL_ENV`: when set to `dev` it is not using Sentry to report crashes
@@ -62,35 +59,34 @@ major problems.
 - `TAGS`: set build tags for tests
 - `FEATURES`: set feature dir, file or scenario to test
 
+## Folders
+
+There are now three types of system folders which Bridge recognises:
+
+|        | Windows                             | Mac                                                 | Linux                               | Linux (XDG)                           |
+|--------|-------------------------------------|-----------------------------------------------------|-------------------------------------|---------------------------------------|
+| config | %APPDATA%\protonmail\bridge-v3      | ~/Library/Application Support/protonmail/bridge-v3  | ~/.config/protonmail/bridge-v3      | $XDG_CONFIG_HOME/protonmail/bridge-v3 |
+| cache  | %LOCALAPPDATA%\protonmail\bridge-v3 | ~/Library/Caches/protonmail/bridge-v3               | ~/.cache/protonmail/bridge-v3       | $XDG_CACHE_HOME/protonmail/bridge-v3  |
+| data	  | %APPDATA%\protonmail\bridge-v3      | ~/Library/Application Support/protonmail/bridge-v3  | ~/.local/share/protonmail/bridge-v3 | $XDG_DATA_HOME/protonmail/bridge-v3   |
+| temp   | %LOCALAPPDATA%\Temp                 | $TMPDIR if non-empty, else /tmp                     | $TMPDIR if non-empty, else /tmp     | $TMPDIR if non-empty, else /tmp       |
+
+
 
 ## Files
-### Database
-The database stores metadata necessary for presenting messages and mailboxes to an email client:
-- Linux: `~/.cache/protonmail/bridge/<cacheVersion>/mailbox-<userID>.db` (unless `XDG_CACHE_HOME` is set, in which case that is used as your `~`)
-- macOS: `~/Library/Caches/protonmail/bridge/<cacheVersion>/mailbox-<userID>.db`
-- Windows: `%LOCALAPPDATA%\protonmail\bridge\<cacheVersion>\mailbox-<userID>.db`
 
-### Preferences
-User preferences are stored in json at the following location:
-- Linux: `~/.config/protonmail/bridge/prefs.json`
-- macOS: `~/Library/ApplicationSupport/protonmail/bridge/prefs.json`
-- Windows: `%APPDATA%\protonmail\bridge\prefs.json`
+|                        | Base Dir | Path                       |
+|------------------------|----------|----------------------------|
+| bridge lock file       | cache    | bridge.lock                |
+| bridge-gui lock file   | cache    | bridge-gui.lock            |
+| vault                  | config   | vault.enc                  |
+| gRPC server json       | config   | grpcServerConfig.json      |
+| gRPC client json       | config   | grpcClientConfig_<id>.json |
+| gRPC Focus server json | config   | grpcFocusServerConfig.json |
+| Logs                   | data     | logs                       |
+| gluon DB               | data     | gluon/backend/db           |
+| gluon messages         | data     | gluon/backend/store        |
+| Update files           | data     | updates                    |
+| sentry cache           | data     | sentry_cache               |
+| Mac/Linux File Socket  | temp     | bridge{4_DIGITS}           |
 
-### IMAP Cache
-The currently subscribed mailboxes are held in a json file:
-- Linux: `~/.cache/protonmail/bridge/<cacheVersion>/user_info.json` (unless `XDG_CACHE_HOME` is set, in which case that is used as your `~`)
-- macOS: `~/Library/Caches/protonmail/bridge/<cacheVersion>/user_info.json`
-- Windows: `%LOCALAPPDATA%\protonmail\bridge\<cacheVersion>\user_info.json`
-
-### Lock file
-Bridge utilises an on-disk lock to ensure only one instance is run at once. The lock file is here: 
-- Linux: `~/.cache/protonmail/bridge/<cacheVersion>/bridge.lock` (unless `XDG_CACHE_HOME` is set, in which case that is used as your `~`)
-- macOS: `~/Library/Caches/protonmail/bridge/<cacheVersion>/bridge.lock`
-- Windows: `%LOCALAPPDATA%\protonmail\bridge\<cacheVersion>\bridge.lock`
-
-### TLS Certificate and Key
-When bridge first starts, it generates a unique TLS certificate and key file at the following locations:
-- Linux: `~/.config/protonmail/bridge/{cert,key}.pem` (unless `XDG_CONFIG_HOME` is set, in which case that is used as your `~/.config`)
-- macOS: `~/Library/ApplicationSupport/protonmail/bridge/{cert,key}.pem`
-- Windows: `%APPDATA%\protonmail\bridge\{cert,key}.pem`
 

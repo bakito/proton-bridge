@@ -27,6 +27,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/emersion/go-message"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
 	"golang.org/x/text/encoding"
@@ -40,6 +41,8 @@ type Part struct {
 	children Parts
 }
 
+const utf8Charset = "UTF-8"
+
 func (p *Part) ContentType() (string, map[string]string, error) {
 	t, params, err := p.Header.ContentType()
 	if err != nil {
@@ -50,6 +53,14 @@ func (p *Part) ContentType() (string, map[string]string, error) {
 	}
 
 	return t, params, err
+}
+
+func (p *Part) ContentDisposition() (string, map[string]string, error) {
+	return pmmime.ParseMediaType(p.Header.Get("Content-Disposition"))
+}
+
+func (p *Part) HasContentID() bool {
+	return len(p.Header.Get("content-id")) != 0
 }
 
 func (p *Part) Child(n int) (part *Part, err error) {
@@ -81,6 +92,14 @@ func (p *Part) AddChild(child *Part) {
 	}
 }
 
+func (p *Part) InsertChild(index int, child *Part) {
+	if p.isMultipartMixedOrRelated() {
+		p.children = slices.Insert(p.children, index, child)
+	} else {
+		p.AddChild(child)
+	}
+}
+
 func (p *Part) ConvertToUTF8() error {
 	logrus.Trace("Converting part to utf-8")
 
@@ -99,7 +118,7 @@ func (p *Part) ConvertToUTF8() error {
 		params = make(map[string]string)
 	}
 
-	params["charset"] = "UTF-8"
+	params["charset"] = utf8Charset
 
 	p.Header.SetContentType(t, params)
 
@@ -112,31 +131,40 @@ func (p *Part) ConvertMetaCharset() error {
 		return err
 	}
 
+	// Override charset to UTF-8 in meta headers only if needed.
+	var metaModified = false
 	goquery.NewDocumentFromNode(doc).Find("meta").Each(func(n int, sel *goquery.Selection) {
 		if val, ok := sel.Attr("content"); ok {
 			t, params, err := pmmime.ParseMediaType(val)
 			if err != nil {
+				logrus.WithField("pkg", "parser").WithError(err).Error("Meta tag parsing fails.")
 				return
 			}
 
-			params["charset"] = "UTF-8"
-
-			sel.SetAttr("content", mime.FormatMediaType(t, params))
+			if charset, ok := params["charset"]; ok && charset != utf8Charset {
+				params["charset"] = utf8Charset
+				sel.SetAttr("content", mime.FormatMediaType(t, params))
+				metaModified = true
+			}
 		}
 
-		if _, ok := sel.Attr("charset"); ok {
-			sel.SetAttr("charset", "UTF-8")
+		if charset, ok := sel.Attr("charset"); ok && charset != utf8Charset {
+			sel.SetAttr("charset", utf8Charset)
+			metaModified = true
 		}
 	})
 
-	buf := new(bytes.Buffer)
+	// Override the body part only if modification was applied
+	// as html.render will sanitise the html headers.
+	if metaModified {
+		buf := new(bytes.Buffer)
 
-	if err := html.Render(buf, doc); err != nil {
-		return err
+		if err := html.Render(buf, doc); err != nil {
+			return err
+		}
+
+		p.Body = buf.Bytes()
 	}
-
-	p.Body = buf.Bytes()
-
 	return nil
 }
 
@@ -183,12 +211,37 @@ func (p *Part) isMultipartMixed() bool {
 	return t == "multipart/mixed"
 }
 
+func (p *Part) isMultipartMixedOrRelated() bool {
+	t, _, err := p.ContentType()
+	if err != nil {
+		return false
+	}
+
+	return t == "multipart/mixed" || t == "multipart/related"
+}
+
+func (p *Part) IsAttachment() bool {
+	disp, _, err := p.ContentDisposition()
+	if err != nil {
+		disp = ""
+	}
+	return disp == "attachment"
+}
+
 func getContentHeaders(header message.Header) message.Header {
 	var res message.Header
 
-	res.Set("Content-Type", header.Get("Content-Type"))
-	res.Set("Content-Disposition", header.Get("Content-Disposition"))
-	res.Set("Content-Transfer-Encoding", header.Get("Content-Transfer-Encoding"))
+	if contentType := header.Get("Content-Type"); contentType != "" {
+		res.Set("Content-Type", contentType)
+	}
+
+	if contentDisposition := header.Get("Content-Disposition"); contentDisposition != "" {
+		res.Set("Content-Disposition", contentDisposition)
+	}
+
+	if contentTransferEncoding := header.Get("Content-Transfer-Encoding"); contentTransferEncoding != "" {
+		res.Set("Content-Transfer-Encoding", contentTransferEncoding)
+	}
 
 	return res
 }

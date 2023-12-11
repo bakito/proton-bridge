@@ -138,14 +138,24 @@ func (l *Locations) ProvideSettingsPath() (string, error) {
 	return l.getSettingsPath(), nil
 }
 
-// ProvideGluonPath returns a location for gluon data.
+// ProvideGluonCachePath returns a location for gluon data.
 // It creates it if it doesn't already exist.
-func (l *Locations) ProvideGluonPath() (string, error) {
-	if err := os.MkdirAll(l.getGluonPath(), 0o700); err != nil {
+func (l *Locations) ProvideGluonCachePath() (string, error) {
+	if err := os.MkdirAll(l.getGluonCachePath(), 0o700); err != nil {
 		return "", err
 	}
 
-	return l.getGluonPath(), nil
+	return l.getGluonCachePath(), nil
+}
+
+// ProvideGluonDataPath returns a location for gluon data.
+// It creates it if it doesn't already exist.
+func (l *Locations) ProvideGluonDataPath() (string, error) {
+	if err := os.MkdirAll(l.getGluonDataPath(), 0o700); err != nil {
+		return "", err
+	}
+
+	return l.getGluonDataPath(), nil
 }
 
 // ProvideLogsPath returns a location for user logs (e.g. ~/.local/share/<company>/<app>/logs).
@@ -178,7 +188,29 @@ func (l *Locations) ProvideUpdatesPath() (string, error) {
 	return l.getUpdatesPath(), nil
 }
 
-func (l *Locations) getGluonPath() string {
+// ProvideStatsPath returns a location for statistics files (e.g. ~/.local/share/<company>/<app>/stats).
+// It creates it if it doesn't already exist.
+func (l *Locations) ProvideStatsPath() (string, error) {
+	if err := os.MkdirAll(l.getStatsPath(), 0o700); err != nil {
+		return "", err
+	}
+
+	return l.getStatsPath(), nil
+}
+
+func (l *Locations) ProvideIMAPSyncConfigPath() (string, error) {
+	if err := os.MkdirAll(l.getIMAPSyncConfigPath(), 0o700); err != nil {
+		return "", err
+	}
+
+	return l.getIMAPSyncConfigPath(), nil
+}
+
+func (l *Locations) getGluonCachePath() string {
+	return filepath.Join(l.userData, "gluon")
+}
+
+func (l *Locations) getGluonDataPath() string {
 	return filepath.Join(l.userData, "gluon")
 }
 
@@ -188,6 +220,10 @@ func (l *Locations) getGUICertPath() string {
 
 func (l *Locations) getSettingsPath() string {
 	return l.userConfig
+}
+
+func (l *Locations) getIMAPSyncConfigPath() string {
+	return filepath.Join(l.userConfig, "imap-sync")
 }
 
 func (l *Locations) getLogsPath() string {
@@ -202,15 +238,18 @@ func (l *Locations) getUpdatesPath() string {
 	return filepath.Join(l.userData, "updates")
 }
 
+func (l *Locations) getStatsPath() string {
+	return filepath.Join(l.userData, "stats")
+}
+
 // Clear removes everything except the lock and update files.
-func (l *Locations) Clear() error {
+func (l *Locations) Clear(except ...string) error {
 	return files.Remove(
 		l.userConfig,
 		l.userData,
 		l.userCache,
 	).Except(
-		l.GetGuiLockFile(),
-		l.getUpdatesPath(),
+		append(except, l.GetGuiLockFile(), l.getUpdatesPath())...,
 	).Do()
 }
 
@@ -218,20 +257,6 @@ func (l *Locations) Clear() error {
 func (l *Locations) ClearUpdates() error {
 	return files.Remove(
 		l.getUpdatesPath(),
-	).Do()
-}
-
-// Clean removes any unexpected files from the app cache folder
-// while leaving files in the standard locations untouched.
-func (l *Locations) Clean() error {
-	return files.Remove(
-		l.userCache,
-		l.userData,
-	).Except(
-		l.GetGuiLockFile(),
-		l.getLogsPath(),
-		l.getUpdatesPath(),
-		l.getGluonPath(),
 	).Do()
 }
 

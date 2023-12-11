@@ -34,12 +34,16 @@ SPStreamEvent newResetFinishedEvent(); ///< Create a new ResetFinishedEvent even
 SPStreamEvent newReportBugFinishedEvent(); ///< Create a new ReportBugFinishedEvent event.
 SPStreamEvent newReportBugSuccessEvent(); ///< Create a new ReportBugSuccessEvent event.
 SPStreamEvent newReportBugErrorEvent(); ///< Create a new ReportBugErrorEvent event.
+SPStreamEvent newReportBugFallbackEvent(); ///< Create a new ReportBugFallbackEvent event.
+SPStreamEvent newCertificateInstallSuccessEvent(); ///< Create a new CertificateInstallSuccessEvent event.
+SPStreamEvent newCertificateInstallCanceledEvent(); ///< Create a new CertificateInstallCanceledEvent event.
+SPStreamEvent newCertificateInstallFailedEvent(); ///< Create anew CertificateInstallFailedEvent event.
 SPStreamEvent newShowMainWindowEvent(); ///< Create a new ShowMainWindowEvent event.
 
 // Login events
 SPStreamEvent newLoginError(grpc::LoginErrorType error, QString const &message); ///< Create a new LoginError event.
 SPStreamEvent newLoginTfaRequestedEvent(QString const &username); ///< Create a new LoginTfaRequestedEvent event.
-SPStreamEvent newLoginTwoPasswordsRequestedEvent(); ///< Create a new LoginTwoPasswordsRequestedEvent event.
+SPStreamEvent newLoginTwoPasswordsRequestedEvent(QString const &username); ///< Create a new LoginTwoPasswordsRequestedEvent event.
 SPStreamEvent newLoginFinishedEvent(QString const &userID, bool wasSignedOut); ///< Create a new LoginFinishedEvent event.
 SPStreamEvent newLoginAlreadyLoggedInEvent(QString const &userID); ///< Create a new LoginAlreadyLoggedInEvent event.
 
@@ -48,9 +52,10 @@ SPStreamEvent newUpdateErrorEvent(grpc::UpdateErrorType errorType); ///< Create 
 SPStreamEvent newUpdateManualReadyEvent(QString const &version); ///< Create a new UpdateManualReadyEvent event.
 SPStreamEvent newUpdateManualRestartNeededEvent(); ///< Create a new UpdateManualRestartNeededEvent event.
 SPStreamEvent newUpdateForceEvent(QString const &version); ///< Create a new UpdateForceEvent event.
-SPStreamEvent newUpdateSilentRestartNeeded(); ///< Create a new UpdateSilentRestartNeeded event.
-SPStreamEvent newUpdateIsLatestVersion(); ///< Create a new UpdateIsLatestVersion event.
-SPStreamEvent newUpdateCheckFinished(); ///< Create a new UpdateCheckFinished event.
+SPStreamEvent newUpdateSilentRestartNeededEvent(); ///< Create a new UpdateSilentRestartNeeded event.
+SPStreamEvent newUpdateIsLatestVersionEvent(); ///< Create a new UpdateIsLatestVersion event.
+SPStreamEvent newUpdateCheckFinishedEvent(); ///< Create a new UpdateCheckFinished event.
+SPStreamEvent newUpdateVersionChangedEvent(); ///< Create a new updateVersionChanged event.
 
 // Cache on disk related events
 SPStreamEvent newDiskCacheErrorEvent(grpc::DiskCacheErrorType errorType); ///< Create a new DiskCacheErrorEvent event.
@@ -68,7 +73,6 @@ SPStreamEvent newHasNoKeychainEvent(); ///< Create a new HasNoKeychainEvent even
 SPStreamEvent newRebuildKeychainEvent(); ///< Create a new RebuildKeychainEvent event.
 
 // Mail related events
-SPStreamEvent newNoActiveKeyForRecipientEvent(QString const &email); ///< Create a new NoActiveKeyForRecipientEvent event.
 SPStreamEvent newAddressChangedEvent(QString const &address); ///< Create a new AddressChangedEvent event.
 SPStreamEvent newAddressChangedLogoutEvent(QString const &address); ///< Create a new AddressChangedLogoutEvent event.
 SPStreamEvent newApiCertIssueEvent(); ///< Create a new ApiCertIssueEvent event.
@@ -77,6 +81,12 @@ SPStreamEvent newApiCertIssueEvent(); ///< Create a new ApiCertIssueEvent event.
 SPStreamEvent newToggleSplitModeFinishedEvent(QString const &userID); ///< Create a new ToggleSplitModeFinishedEvent event.
 SPStreamEvent newUserDisconnectedEvent(QString const &username); ///< Create a new UserDisconnectedEvent event.
 SPStreamEvent newUserChangedEvent(QString const &userID); ///< Create a new UserChangedEvent event.
+SPStreamEvent newUserBadEvent(QString const &userID, QString const& errorMessage); ///< Create a new UserBadEvent event.
+SPStreamEvent newUsedBytesChangedEvent(QString const &userID, qint64 usedBytes);  ///< Create a new UsedBytesChangedEvent event.
+SPStreamEvent newIMAPLoginFailedEvent(QString const &username); ///< Create a new ImapLoginFailedEvent event.
+SPStreamEvent newSyncStartedEvent(QString const &userID); ///< Create a new SyncStarted event.
+SPStreamEvent newSyncFinishedEvent(QString const &userID); ///< Create a new SyncFinished event.
+SPStreamEvent newSyncProgressEvent(QString const &userID, double progress, qint64 elapsedMs, qint64 remainingMs); ///< Create a new SyncFinished event.
 
 // Generic error event
 SPStreamEvent newGenericErrorEvent(grpc::ErrorCode errorCode); ///< Create a new GenericErrrorEvent event.

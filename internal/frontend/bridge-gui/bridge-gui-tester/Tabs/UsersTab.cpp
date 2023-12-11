@@ -51,9 +51,14 @@ UsersTab::UsersTab(QWidget *parent)
     connect(ui_.buttonEditUser, &QPushButton::clicked, this, &UsersTab::onEditUserButton);
     connect(ui_.tableUserList, &QTableView::doubleClicked, this, &UsersTab::onEditUserButton);
     connect(ui_.buttonRemoveUser, &QPushButton::clicked, this, &UsersTab::onRemoveUserButton);
+    connect(ui_.buttonUserBadEvent, &QPushButton::clicked, this, &UsersTab::onSendUserBadEvent);
+    connect(ui_.buttonImapLoginFailed, &QPushButton::clicked, this, &UsersTab::onSendIMAPLoginFailedEvent);
+    connect(ui_.buttonUsedBytesChanged, &QPushButton::clicked, this, &UsersTab::onSendUsedBytesChangedEvent);
     connect(ui_.checkUsernamePasswordError, &QCheckBox::toggled, this, &UsersTab::updateGUIState);
+    connect(ui_.checkSync, &QCheckBox::toggled, this, &UsersTab::onCheckSyncToggled);
+    connect(ui_.sliderSync, &QSlider::valueChanged, this, &UsersTab::onSliderSyncValueChanged);
 
-    users_.append(randomUser());
+    users_.append(defaultUser());
 
     this->updateGUIState();
 }
@@ -96,6 +101,8 @@ void UsersTab::onEditUserButton() {
     if (grpc.isStreaming()) {
         grpc.sendEvent(newUserChangedEvent(user->id()));
     }
+
+    this->updateGUIState();
 }
 
 
@@ -128,11 +135,100 @@ void UsersTab::onSelectionChanged(QItemSelection, QItemSelection) {
 //****************************************************************************************************************************************************
 //
 //****************************************************************************************************************************************************
+void UsersTab::onSendUserBadEvent() {
+    SPUser const user = selectedUser();
+    int const index = this->selectedIndex();
+
+    if (!user) {
+        app().log().error(QString("%1 failed. Unkown user.").arg(__FUNCTION__));
+        return;
+    }
+
+    if (UserState::SignedOut == user->state()) {
+        app().log().error(QString("%1 failed. User is already signed out").arg(__FUNCTION__));
+    }
+
+    GRPCService &grpc = app().grpc();
+    if (grpc.isStreaming()) {
+        QString const userID = user->id();
+        grpc.sendEvent(newUserChangedEvent(userID));
+        grpc.sendEvent(newUserBadEvent(userID, ui_.editUserBadEvent->text()));
+    }
+
+    this->updateGUIState();
+}
+
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void UsersTab::onSendUsedBytesChangedEvent() {
+    SPUser const user = selectedUser();
+    int const index = this->selectedIndex();
+
+    if (!user) {
+        app().log().error(QString("%1 failed. Unkown user.").arg(__FUNCTION__));
+        return;
+    }
+
+    if (UserState::Connected != user->state()) {
+        app().log().error(QString("%1 failed. User is not connected").arg(__FUNCTION__));
+    }
+
+    qint64 const usedBytes = qint64(ui_.spinUsedBytes->value());
+    user->setUsedBytes(usedBytes);
+    users_.touch(index);
+
+    GRPCService &grpc = app().grpc();
+    if (grpc.isStreaming()) {
+        QString const userID = user->id();
+        grpc.sendEvent(newUsedBytesChangedEvent(userID, usedBytes));
+    }
+
+    this->updateGUIState();
+}
+
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void UsersTab::onSendIMAPLoginFailedEvent() {
+    GRPCService &grpc = app().grpc();
+    if (grpc.isStreaming()) {
+        grpc.sendEvent(newIMAPLoginFailedEvent(ui_.editIMAPLoginFailedUsername->text()));
+    }
+
+    this->updateGUIState();
+}
+
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
 void UsersTab::updateGUIState() {
-    bool const hasSelectedUser = ui_.tableUserList->selectionModel()->hasSelection();
+    SPUser const user = selectedUser();
+    bool const hasSelectedUser = user.get();
+    UserState const state = user ? user->state() : UserState::SignedOut;
+
     ui_.buttonEditUser->setEnabled(hasSelectedUser);
     ui_.buttonRemoveUser->setEnabled(hasSelectedUser);
+    ui_.groupBoxBadEvent->setEnabled(hasSelectedUser && (UserState::SignedOut != state));
+    ui_.groupBoxUsedSpace->setEnabled(hasSelectedUser && (UserState::Connected == state));
     ui_.editUsernamePasswordError->setEnabled(ui_.checkUsernamePasswordError->isChecked());
+    ui_.spinUsedBytes->setValue(user ? user->usedBytes() : 0.0);
+    ui_.groupboxSync->setEnabled(user.get());
+
+    if (user)
+        ui_.editIMAPLoginFailedUsername->setText(user->primaryEmailOrUsername());
+
+    QSignalBlocker b(ui_.checkSync);
+    bool const syncing = user && user->isSyncing();
+    ui_.checkSync->setChecked(syncing);
+    b = QSignalBlocker(ui_.sliderSync);
+    ui_.sliderSync->setEnabled(syncing);
+    qint32 const progressPercent = syncing ? qint32(user->syncProgress() * 100.0f) : 0;
+    ui_.sliderSync->setValue(progressPercent);
+    ui_.labelSync->setText(syncing ? QString("%1%").arg(progressPercent) : "" );
 }
 
 
@@ -176,8 +272,8 @@ bridgepp::SPUser UsersTab::userWithID(QString const &userID) {
 /// \return The user with the given username.
 /// \return A null pointer if the user is not in the list.
 //****************************************************************************************************************************************************
-bridgepp::SPUser UsersTab::userWithUsername(QString const &username) {
-    return users_.userWithUsername(username);
+bridgepp::SPUser UsersTab::userWithUsernameOrEmail(QString const &username) {
+    return users_.userWithUsernameOrEmail(username);
 }
 
 
@@ -309,5 +405,71 @@ void UsersTab::removeUser(QString const &userID) {
 //****************************************************************************************************************************************************
 void UsersTab::configureUserAppleMail(QString const &userID, QString const &address) {
     app().log().info(QString("Apple mail configuration was requested for user %1, address %2").arg(userID, address));
+}
 
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] doResync Did the user request a resync?
+//****************************************************************************************************************************************************
+void UsersTab::processBadEventUserFeedback(QString const &userID, bool doResync) {
+    app().log().info(QString("Feedback received for bad event: doResync = %1, userID = %2").arg(doResync ? "true" : "false", userID));
+    if (doResync) {
+        return; // we do not do any form of emulation for resync.
+    }
+
+    SPUser user = users_.userWithID(userID);
+    if (!user) {
+        app().log().error(QString("%1(): could not find user with id %1.").arg(__func__, userID));
+    }
+
+    user->setState(UserState::SignedOut);
+    users_.touch(userID);
+    GRPCService &grpc = app().grpc();
+    if (grpc.isStreaming()) {
+        grpc.sendEvent(newUserChangedEvent(userID));
+    }
+
+    this->updateGUIState();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] checked Is the sync checkbox checked?
+//****************************************************************************************************************************************************
+void UsersTab::onCheckSyncToggled(bool checked) {
+    SPUser const user = this->selectedUser();
+    if ((!user) || (user->isSyncing() == checked)) {
+        return;
+    }
+
+    user->setIsSyncing(checked);
+    user->setSyncProgress(0.0);
+    GRPCService &grpc = app().grpc();
+
+    // we do not apply delay for these event.
+    if (checked) {
+        grpc.sendEvent(newSyncStartedEvent(user->id()));
+        grpc.sendEvent(newSyncProgressEvent(user->id(), 0.0, 1, 1));
+    } else {
+        grpc.sendEvent(newSyncFinishedEvent(user->id()));
+    }
+
+    this->updateGUIState();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] value The value for the slider.
+//****************************************************************************************************************************************************
+void UsersTab::onSliderSyncValueChanged(int value) {
+    SPUser const user = this->selectedUser();
+    if ((!user) || (!user->isSyncing()) || user->syncProgress() == value) {
+        return;
+    }
+
+    double const progress = value / 100.0;
+    user->setSyncProgress(progress);
+    app().grpc().sendEvent(newSyncProgressEvent(user->id(), progress, 1, 1));  // we do not simulate elapsed & remaining.
+    this->updateGUIState();
 }

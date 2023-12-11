@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -31,16 +32,16 @@ func BenchmarkVault(b *testing.B) {
 	vaultDir, gluonDir := b.TempDir(), b.TempDir()
 
 	// Create a new vault.
-	s, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"))
+	s, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"), async.NoopPanicHandler{})
 	require.NoError(b, err)
-	require.False(b, corrupt)
+	require.NoError(b, corrupt)
 
 	// Add 10kB of cookies to the vault.
 	require.NoError(b, s.SetCookies(bytes.Repeat([]byte("a"), 10_000)))
 
 	// Create 10 vault users.
 	for idx := 0; idx < 10; idx++ {
-		user, err := s.AddUser(uuid.NewString(), "username", "authUID", "authRef", []byte("keyPass"))
+		user, err := s.AddUser(uuid.NewString(), "username", "dummy@proton.me", "authUID", "authRef", []byte("keyPass"))
 		require.NoError(b, err)
 
 		require.NoError(b, user.SetKeyPass([]byte("new key pass")))

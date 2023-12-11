@@ -11,7 +11,7 @@ ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 .PHONY: build build-gui build-nogui build-launcher versioner hasher
 
 # Keep version hardcoded so app build works also without Git repository.
-BRIDGE_APP_VERSION?=3.0.10+git
+BRIDGE_APP_VERSION?=3.8.0+git
 APP_VERSION:=${BRIDGE_APP_VERSION}
 APP_FULL_NAME:=Proton Mail Bridge
 APP_VENDOR:=Proton AG
@@ -19,20 +19,26 @@ SRC_ICO:=bridge.ico
 SRC_ICNS:=Bridge.icns
 SRC_SVG:=bridge.svg
 EXE_NAME:=proton-bridge
-REVISION:=$(shell git rev-parse --short=10 HEAD)
+REVISION:=$(shell ./utils/get_revision.sh)
+TAG:=$(shell ./utils/get_revision.sh tag)
 BUILD_TIME:=$(shell date +%FT%T%z)
 MACOS_MIN_VERSION_ARM64=11.0
 MACOS_MIN_VERSION_AMD64=10.15
+BUILD_ENV?=dev
 
 BUILD_FLAGS:=-tags='${BUILD_TAGS}'
 BUILD_FLAGS_LAUNCHER:=${BUILD_FLAGS}
-BUILD_FLAGS_GUI:=-tags='${BUILD_TAGS} build_qt'
-GO_LDFLAGS:=$(addprefix -X github.com/ProtonMail/proton-bridge/v3/internal/constants., Version=${APP_VERSION} Revision=${REVISION} BuildTime=${BUILD_TIME})
+GO_LDFLAGS:=$(addprefix -X github.com/ProtonMail/proton-bridge/v3/internal/constants., Version=${APP_VERSION} Revision=${REVISION} Tag=${TAG} BuildTime=${BUILD_TIME})
 GO_LDFLAGS+=-X "github.com/ProtonMail/proton-bridge/v3/internal/constants.FullAppName=${APP_FULL_NAME}"
 
-ifneq "${BUILD_LDFLAGS}" ""
-	GO_LDFLAGS+=${BUILD_LDFLAGS}
+ifneq "${DSN_SENTRY}" ""
+	GO_LDFLAGS+=-X github.com/ProtonMail/proton-bridge/v3/internal/constants.DSNSentry=${DSN_SENTRY}
 endif
+
+ifneq "${BUILD_ENV}" ""
+	GO_LDFLAGS+=-X github.com/ProtonMail/proton-bridge/v3/internal/constants.BuildEnv=${BUILD_ENV}
+endif
+
 GO_LDFLAGS_LAUNCHER:=${GO_LDFLAGS}
 ifeq "${TARGET_OS}" "windows"
 	#GO_LDFLAGS+=-H=windowsgui # Disabled so we can inspect trace logs from the bridge for debugging.
@@ -40,7 +46,6 @@ ifeq "${TARGET_OS}" "windows"
 endif
 
 BUILD_FLAGS+=-ldflags '${GO_LDFLAGS}'
-BUILD_FLAGS_GUI+=-ldflags "${GO_LDFLAGS}"
 BUILD_FLAGS_LAUNCHER+=-ldflags '${GO_LDFLAGS_LAUNCHER}'
 DEPLOY_DIR:=cmd/${TARGET_CMD}/deploy
 DIRNAME:=$(shell basename ${CURDIR})
@@ -96,9 +101,9 @@ endif
 
 ifeq "${GOOS}" "windows"
 	go-build-finalize= \
-		powershell Copy-Item ${ROOT_DIR}/${RESOURCE_FILE} ${4}  && \
-		$(call go-build,$(1),$(2),$(3)) && \
-		powershell Remove-Item ${4} -Force
+		$(if $(4),powershell Copy-Item ${ROOT_DIR}/${RESOURCE_FILE} ${4}  &&,) \
+		$(call go-build,$(1),$(2),$(3)) \
+		$(if $(4), && powershell Remove-Item ${4} -Force,)
 endif
 
 ${EXE_NAME}: gofiles  ${RESOURCE_FILE}
@@ -112,7 +117,7 @@ versioner:
 	go build ${BUILD_FLAGS} -o versioner utils/versioner/main.go
 
 vault-editor:
-	go build -tags debug -o vault-editor utils/vault-editor/main.go
+	$(call go-build-finalize,"-tags=debug","vault-editor","./utils/vault-editor/main.go")
 
 hasher:
 	go build -o hasher utils/hasher/main.go
@@ -154,8 +159,11 @@ ${EXE_TARGET}: check-build-essentials ${EXE_NAME}
 		BRIDGE_VENDOR="${APP_VENDOR}" \
 		BRIDGE_APP_VERSION=${APP_VERSION} \
 		BRIDGE_REVISION=${REVISION} \
-		BRIDGE_BUILD_TIME=${BUILD_TIME} \
+		BRIDGE_TAG=${TAG} \
+		BRIDGE_DSN_SENTRY=${DSN_SENTRY} \
+ 		BRIDGE_BUILD_TIME=${BUILD_TIME} \
 		BRIDGE_GUI_BUILD_CONFIG=Release \
+		BRIDGE_BUILD_ENV=${BUILD_ENV} \
 		BRIDGE_INSTALL_PATH=${ROOT_DIR}/${DEPLOY_DIR}/${GOOS} \
 		./build.sh install
 	mv "${ROOT_DIR}/${BRIDGE_EXE}" "$(ROOT_DIR)/${EXE_TARGET}"
@@ -177,7 +185,7 @@ ${RESOURCE_FILE}: ./dist/info.rc ./dist/${SRC_ICO} .FORCE
 
 ## Dev dependencies
 .PHONY: install-devel-tools install-linter install-go-mod-outdated install-git-hooks
-LINTVER:="v1.50.0"
+LINTVER:="v1.52.2"
 LINTSRC:="https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh"
 
 install-dev-dependencies: install-devel-tools install-linter install-go-mod-outdated
@@ -221,20 +229,50 @@ add-license:
 change-copyright-year:
 	./utils/missing_license.sh change-year
 
+GOCOVERAGE=-covermode=count -coverpkg=github.com/ProtonMail/proton-bridge/v3/internal/...,github.com/ProtonMail/proton-bridge/v3/pkg/...,
+GOCOVERDIR=-args -test.gocoverdir=$$PWD/coverage
+
 test: gofiles
-	go test -v -timeout=5m -p=1 -count=1 -coverprofile=/tmp/coverage.out -run=${TESTRUN} ./internal/... ./pkg/...
+	mkdir -p coverage/unit-${GOOS}
+	go test \
+		-v -timeout=20m -p=1 -count=1 \
+		${GOCOVERAGE} \
+		-run=${TESTRUN} ./internal/... ./pkg/... \
+		${GOCOVERDIR}/unit-${GOOS}
 
 test-race: gofiles
-	go test -v -timeout=30m -p=1 -count=1 -race -failfast -run=${TESTRUN} ./internal/... ./pkg/...
+	go test -v -timeout=40m -p=1 -count=1 -race -failfast -run=${TESTRUN} ./internal/... ./pkg/...
 
 test-integration: gofiles
-	go test -v -timeout=10m -p=1 -count=1 github.com/ProtonMail/proton-bridge/v3/tests
+	mkdir -p coverage/integration
+	go test \
+		-v -timeout=60m -p=1 -count=1 -tags=test_integration \
+		${GOCOVERAGE} \
+		github.com/ProtonMail/proton-bridge/v3/tests \
+		${GOCOVERDIR}/integration
+
 
 test-integration-debug: gofiles
 	dlv test github.com/ProtonMail/proton-bridge/v3/tests -- -test.v -test.timeout=10m -test.parallel=1 -test.count=1
 
 test-integration-race: gofiles
 	go test -v -timeout=60m -p=1 -count=1 -race -failfast github.com/ProtonMail/proton-bridge/v3/tests
+
+test-integration-nightly: gofiles
+	mkdir -p coverage/integration
+	go test \
+		-v -timeout=90m -p=1 -count=1 -tags=test_integration \
+		${GOCOVERAGE} \
+		github.com/ProtonMail/proton-bridge/v3/tests \
+		${GOCOVERDIR}/integration \
+		nightly
+
+fuzz: gofiles
+	go test -fuzz=FuzzUnmarshal 	 -parallel=4 -fuzztime=60s $(PWD)/internal/legacy/credentials
+	go test -fuzz=FuzzNewParser 	 -parallel=4 -fuzztime=60s $(PWD)/pkg/message/parser
+	go test -fuzz=FuzzReadHeaderBody -parallel=4 -fuzztime=60s $(PWD)/pkg/message
+	go test -fuzz=FuzzDecodeHeader 	 -parallel=4 -fuzztime=60s $(PWD)/pkg/mime
+	go test -fuzz=FuzzDecodeCharset  -parallel=4 -fuzztime=60s $(PWD)/pkg/mime
 
 bench:
 	go test -run '^$$' -bench=. -memprofile bench_mem.pprof -cpuprofile bench_cpu.pprof ./internal/store
@@ -247,11 +285,28 @@ coverage: test
 mocks:
 	mockgen --package mocks github.com/ProtonMail/proton-bridge/v3/internal/bridge TLSReporter,ProxyController,Autostarter > tmp
 	mv tmp internal/bridge/mocks/mocks.go
-	mockgen --package mocks github.com/ProtonMail/proton-bridge/v3/internal/async PanicHandler > internal/bridge/mocks/async_mocks.go
+	mockgen --package mocks github.com/ProtonMail/gluon/async PanicHandler > internal/bridge/mocks/async_mocks.go
 	mockgen --package mocks github.com/ProtonMail/gluon/reporter Reporter > internal/bridge/mocks/gluon_mocks.go
 	mockgen --package mocks github.com/ProtonMail/proton-bridge/v3/internal/updater Downloader,Installer > internal/updater/mocks/mocks.go
+	mockgen --package mocks github.com/ProtonMail/proton-bridge/v3/internal/telemetry HeartbeatManager > internal/telemetry/mocks/mocks.go
+	cp internal/telemetry/mocks/mocks.go internal/bridge/mocks/telemetry_mocks.go
+	mockgen --package mocks github.com/ProtonMail/proton-bridge/v3/internal/services/userevents \
+EventSource,EventIDStore  > internal/services/userevents/mocks/mocks.go
+	mockgen --package userevents github.com/ProtonMail/proton-bridge/v3/internal/services/userevents \
+EventSubscriber,MessageEventHandler,LabelEventHandler,AddressEventHandler,RefreshEventHandler,UserEventHandler,UserUsedSpaceEventHandler > tmp
+	mv tmp internal/services/userevents/mocks_test.go
+	mockgen --package mocks github.com/ProtonMail/proton-bridge/v3/internal/events EventPublisher \
+> internal/events/mocks/mocks.go
+	mockgen --package mocks github.com/ProtonMail/proton-bridge/v3/internal/services/useridentity IdentityProvider,Telemetry \
+> internal/services/useridentity/mocks/mocks.go
+	mockgen --self_package "github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice" -package syncservice github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice \
+ApplyStageInput,BuildStageInput,BuildStageOutput,DownloadStageInput,DownloadStageOutput,MetadataStageInput,MetadataStageOutput,\
+StateProvider,Regulator,UpdateApplier,MessageBuilder,APIClient,Reporter,DownloadRateModifier \
+> tmp
+	mv tmp internal/services/syncservice/mocks_test.go
+	mockgen --package mocks github.com/ProtonMail/gluon/connector IMAPStateWrite > internal/services/imapservice/mocks/mocks.go
 
-lint: gofiles lint-golang lint-license lint-dependencies lint-changelog
+lint: gofiles lint-golang lint-license lint-dependencies lint-changelog lint-bug-report
 
 lint-license:
 	./utils/missing_license.sh check
@@ -266,6 +321,12 @@ lint-golang:
 	which golangci-lint || $(MAKE) install-linter
 	$(info linting with GOMAXPROCS=${GOMAXPROCS})
 	golangci-lint run ./...
+
+lint-bug-report:
+	python3 utils/validate_bug_report_file.py --file "internal/frontend/bridge-gui/bridge-gui/qml/Resources/bug_report_flow.json"
+
+lint-bug-report-preview:
+	python3 utils/validate_bug_report_file.py --file "internal/frontend/bridge-gui/bridge-gui/qml/Resources/bug_report_flow.json" --preview
 
 gobinsec: gobinsec-cache.yml build
 	gobinsec -wait -cache -config utils/gobinsec_conf.yml ${EXE_TARGET} ${DEPLOY_DIR}/${TARGET_OS}/${LAUNCHER_EXE}
@@ -294,7 +355,7 @@ gofiles: ./internal/bridge/credits.go
 	cd ./utils/ && ./credits.sh bridge
 
 ## Run and debug
-.PHONY: run run-qt run-qt-cli run-nogui run-cli run-noninteractive run-debug run-qml-preview clean-vendor clean-frontend-qt clean-frontend-qt-common clean
+.PHONY: run run-qt run-qt-cli run-nogui run-cli run-noninteractive run-debug run-gui-tester clean-vendor clean-frontend-qt clean-frontend-qt-common clean
 
 LOG?=debug
 LOG_IMAP?=client # client/server/all, or empty to turn it off
@@ -319,14 +380,32 @@ run-nogui: build-nogui clean-vendor gofiles
 	PROTONMAIL_ENV=dev ./${LAUNCHER_EXE} ${RUN_FLAGS} -c
 
 run-debug:
-	dlv debug ./cmd/Desktop-Bridge/main.go -- -l=debug
+	dlv debug \
+		--build-flags "-ldflags '-X github.com/ProtonMail/proton-bridge/v3/internal/constants.Version=3.1.0+git'" \
+		./cmd/Desktop-Bridge/main.go \
+		-- \
+		-n -l=trace
+
+ifeq "${TARGET_OS}" "windows"
+	EXE_SUFFIX=.exe
+endif
+
+bridge-gui-tester:  build-gui
+	cp ./cmd/Desktop-Bridge/deploy/${TARGET_OS}/bridge-gui${EXE_SUFFIX} .
+	cd ./internal/frontend/bridge-gui/bridge-gui-tester && cmake . && make
+
+run-gui-tester: bridge-gui-tester
+	# copying tester as bridge so bridge-gui will start it and connect to it automatically
+	cp ./internal/frontend/bridge-gui/bridge-gui-tester/bridge-gui-tester${EXE_SUFFIX} bridge${EXE_SUFFIX}
+	./bridge-gui${EXE_SUFFIX}
+
 
 clean-vendor:
 	rm -rf ./vendor
 
 clean-gui:
 	cd internal/frontend/bridge-gui/ && \
-		rm -f Version.h && \
+		rm -f BuildConfig.h && \
 		rm -rf cmake-build-*/
 
 clean-vcpkg:
@@ -349,6 +428,6 @@ clean: clean-vendor clean-gui clean-vcpkg
 .PHONY: generate
 generate:
 	go generate ./...
-	$(MAKE) add-license
+	$(MAKE) build
 
 .FORCE:

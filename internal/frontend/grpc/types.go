@@ -17,16 +17,8 @@
 
 package grpc
 
-type CrashHandler interface {
-	HandlePanic()
-}
-
 type Restarter interface {
 	Set(restart, crash bool)
 	AddFlags(flags ...string)
 	Override(exe string)
-}
-
-type Locator interface {
-	ProvideSettingsPath() (string, error)
 }

@@ -23,6 +23,7 @@
 #include <stdexcept>
 
 
+
 namespace bridgepp {
 
 
@@ -31,17 +32,31 @@ namespace bridgepp {
 //****************************************************************************************************************************************************
 class Exception : public std::exception {
 public: // member functions
-    explicit Exception(QString what = QString()) noexcept; ///< Constructor
+    explicit Exception(QString qwhat = QString(), QString details = QString(), QString function = QString(),
+        QByteArray attachment = QByteArray(), bool showSupportLink = false) noexcept; ///< Constructor
     Exception(Exception const &ref) noexcept; ///< copy constructor
     Exception(Exception &&ref) noexcept; ///< copy constructor
     Exception &operator=(Exception const &) = delete; ///< Disabled assignment operator
     Exception &operator=(Exception &&) = delete; ///< Disabled assignment operator
     ~Exception() noexcept override = default; ///< Destructor
-    QString const &qwhat() const noexcept; ///< Return the description of the exception as a QString
+    QString qwhat() const noexcept; ///< Return the description of the exception as a QString
     const char *what() const noexcept override; ///< Return the description of the exception as C style string
+    QString details() const noexcept; ///< Return the details for the exception
+    QString function() const noexcept; ///< Return the function that threw the exception.
+    QByteArray attachment() const noexcept; ///< Return the attachment for the exception.
+    QString detailedWhat() const; ///< Return the detailed description of the message (i.e. including the function name and the details).
+    bool showSupportLink() const; ///< Return the value for the 'Show support link' option.
+
+public: // static data members
+    static qsizetype const attachmentMaxLength {25 * 1024}; ///< The maximum length text attachment sent in Sentry reports, in bytes.
 
 private: // data members
-    QString const what_; ///< The description of the exception
+    QString const qwhat_; ///< The description of the exception.
+    QByteArray const what_; ///< The c-string version of the qwhat message. Stored as a QByteArray for automatic lifetime management.
+    QString const details_; ///< The optional details for the exception.
+    QString const function_; ///< The name of the function that created the exception.
+    QByteArray const attachment_; ///< The attachment to add to the exception.
+    bool const showSupportLink_; ///< Should the GUI feedback include a link to support.
 };
 
 

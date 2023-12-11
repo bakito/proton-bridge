@@ -38,6 +38,10 @@ void UserList::connectGRPCEvents() const {
     GRPCClient &client = app().grpc();
     connect(&client, &GRPCClient::userChanged, this, &UserList::onUserChanged);
     connect(&client, &GRPCClient::toggleSplitModeFinished, this, &UserList::onToggleSplitModeFinished);
+    connect(&client, &GRPCClient::usedBytesChanged, this, &UserList::onUsedBytesChanged);
+    connect(&client, &GRPCClient::syncStarted, this, &UserList::onSyncStarted);
+    connect(&client, &GRPCClient::syncFinished, this, &UserList::onSyncFinished);
+    connect(&client, &GRPCClient::syncProgress, this, &UserList::onSyncProgress);
 }
 
 
@@ -149,6 +153,19 @@ bridgepp::SPUser UserList::getUserWithID(QString const &userID) const {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] username The username or email.
+/// \return The user with the given ID.
+/// \return A null pointer if the user could not be found.
+//****************************************************************************************************************************************************
+bridgepp::SPUser UserList::getUserWithUsernameOrEmail(QString const &username) const {
+    QList<SPUser>::const_iterator it = std::find_if(users_.begin(), users_.end(), [username](SPUser const &user) -> bool {
+        return user && ((username.compare(user->username(), Qt::CaseInsensitive) == 0) || user->addresses().contains(username, Qt::CaseInsensitive));
+    });
+    return (it == users_.end()) ? nullptr : *it;
+}
+
+
+//****************************************************************************************************************************************************
 /// \param[in] row The row.
 //****************************************************************************************************************************************************
 User *UserList::get(int row) const {
@@ -158,6 +175,17 @@ User *UserList::get(int row) const {
 
     app().log().trace(QString("Retrieving user at row %1 (user userCount = %2)").arg(row).arg(users_.count()));
     return users_[row].get();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \return The primary email address (or if unknown the username) of the user.
+/// \return An empty string if the user cannot be found.
+//****************************************************************************************************************************************************
+QString UserList::primaryEmailOrUsername(QString const &userID) const {
+    SPUser const user = this->getUserWithID(userID);
+    return user ? user->primaryEmailOrUsername() : QString();
 }
 
 
@@ -211,4 +239,62 @@ void UserList::onToggleSplitModeFinished(QString const &userID) {
 //****************************************************************************************************************************************************
 int UserList::count() const {
     return users_.size();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] usedBytes The used space, in bytes.
+//****************************************************************************************************************************************************
+void UserList::onUsedBytesChanged(QString const &userID, qint64 usedBytes) {
+    int const index = this->rowOfUserID(userID);
+    if (index < 0) {
+        app().log().error(QString("Received usedBytesChanged event for unknown userID %1").arg(userID));
+        return;
+    }
+    users_[index]->setUsedBytes(usedBytes);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+//****************************************************************************************************************************************************
+void UserList::onSyncStarted(QString const &userID) {
+    int const index = this->rowOfUserID(userID);
+    if (index < 0) {
+        app().log().error(QString("Received syncStarted event for unknown userID %1").arg(userID));
+        return;
+    }
+    users_[index]->setIsSyncing(true);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+//****************************************************************************************************************************************************
+void UserList::onSyncFinished(QString const &userID) {
+    int const index = this->rowOfUserID(userID);
+    if (index < 0) {
+        app().log().error(QString("Received syncFinished event for unknown userID %1").arg(userID));
+        return;
+    }
+    users_[index]->setIsSyncing(false);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] progress The sync progress ratio.
+/// \param[in] elapsedMs The elapsed sync time in milliseconds.
+/// \param[in] remainingMs The remaining sync time in milliseconds.
+//****************************************************************************************************************************************************
+void UserList::onSyncProgress(QString const &userID, double progress, float elapsedMs, float remainingMs) {
+    Q_UNUSED(elapsedMs)
+    Q_UNUSED(remainingMs)
+    int const index = this->rowOfUserID(userID);
+    if (index < 0) {
+        app().log().error(QString("Received syncProgress event for unknown userID %1").arg(userID));
+        return;
+    }
+    users_[index]->setSyncProgress(progress);
 }

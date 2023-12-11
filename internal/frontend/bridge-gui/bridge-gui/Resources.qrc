@@ -5,12 +5,11 @@
         <file>qml/AccountView.qml</file>
         <file>qml/Banner.qml</file>
         <file>qml/Bridge.qml</file>
-        <file>qml/Bridge_test.qml</file>
-        <file>qml/bridgeqml.qmlproject</file>
-        <file>qml/BridgeTest/UserControl.qml</file>
-        <file>qml/BridgeTest/UserList.qml</file>
-        <file>qml/BridgeTest/UserModel.qml</file>
+        <file>qml/BugCategoryView.qml</file>
+        <file>qml/BugQuestionView.qml</file>
+        <file>qml/BugReportFlow.qml</file>
         <file>qml/BugReportView.qml</file>
+        <file>qml/CategoryItem.qml</file>
         <file>qml/Configuration.qml</file>
         <file>qml/ConfigurationItem.qml</file>
         <file>qml/ContentWrapper.qml</file>
@@ -20,20 +19,25 @@
         <file>qml/icons/ic-alert.svg</file>
         <file>qml/icons/ic-apple-mail.svg</file>
         <file>qml/icons/ic-arrow-left.svg</file>
+        <file>qml/icons/ic-bridge.svg</file>
         <file>qml/icons/ic-card-identity.svg</file>
         <file>qml/icons/ic-check.svg</file>
         <file>qml/icons/ic-chevron-down.svg</file>
+        <file>qml/icons/ic-chevron-left.svg</file>
+        <file>qml/icons/ic-chevron-right.svg</file>
         <file>qml/icons/ic-chevron-up.svg</file>
         <file>qml/icons/ic-cog-wheel.svg</file>
         <file>qml/icons/ic-connected.svg</file>
         <file>qml/icons/ic-copy.svg</file>
         <file>qml/icons/ic-cross-close.svg</file>
+        <file>qml/icons/ic-dot.svg</file>
         <file>qml/icons/ic-drive.svg</file>
         <file>qml/icons/ic-exclamation-circle-filled.svg</file>
         <file>qml/icons/ic-external-link.svg</file>
         <file>qml/icons/ic-eye-slash.svg</file>
         <file>qml/icons/ic-eye.svg</file>
         <file>qml/icons/ic-illustrative-view-html-code.svg</file>
+        <file>qml/icons/ic-info-circle.svg</file>
         <file>qml/icons/ic-info-circle-filled.svg</file>
         <file>qml/icons/ic-info.svg</file>
         <file>qml/icons/ic-microsoft-outlook.svg</file>
@@ -42,16 +46,22 @@
         <file>qml/icons/ic-other-mail-clients.svg</file>
         <file>qml/icons/ic-plus.svg</file>
         <file>qml/icons/ic-question-circle.svg</file>
+        <file>qml/icons/ic-splash-check.svg</file>
         <file>qml/icons/ic-success.svg</file>
         <file>qml/icons/ic-three-dots-vertical.svg</file>
         <file>qml/icons/ic-trash.svg</file>
+        <file>qml/icons/ic-warning-orange.svg</file>
+        <file>qml/icons/img-client-config-selector.svg</file>
+        <file>qml/icons/img-client-config-success.svg</file>
+        <file>qml/icons/img-macos-cert-screenshot.png</file>
+        <file>qml/icons/img-macos-profile-screenshot.png</file>
+        <file>qml/icons/img-mail-clients.svg</file>
+        <file>qml/icons/img-mail-logo-wordmark-dark.svg</file>
+        <file>qml/icons/img-mail-logo-wordmark.svg</file>
         <file>qml/icons/img-proton-logos.png</file>
         <file>qml/icons/img-proton-logos.svg</file>
         <file>qml/icons/img-splash.png</file>
         <file>qml/icons/img-splash.svg</file>
-        <file>qml/icons/img-welcome-dark.png</file>
-        <file>qml/icons/img-welcome-dark.svg</file>
-        <file>qml/icons/img-welcome.png</file>
         <file>qml/icons/img-welcome.svg</file>
         <file>qml/icons/Loader_16.svg</file>
         <file>qml/icons/Loader_48.svg</file>
@@ -71,6 +81,7 @@
         <file>qml/KeychainSettings.qml</file>
         <file>qml/LocalCacheSettings.qml</file>
         <file>qml/MainWindow.qml</file>
+        <file>qml/NoAccountView.qml</file>
         <file>qml/NotificationDialog.qml</file>
         <file>qml/NotificationPopups.qml</file>
         <file>qml/Notifications/Notification.qml</file>
@@ -86,6 +97,7 @@
         <file>qml/Proton/ComboBox.qml</file>
         <file>qml/Proton/Dialog.qml</file>
         <file>qml/Proton/Label.qml</file>
+        <file>qml/Proton/LinkLabel.qml</file>
         <file>qml/Proton/Menu.qml</file>
         <file>qml/Proton/MenuItem.qml</file>
         <file>qml/Proton/Popup.qml</file>
@@ -96,24 +108,27 @@
         <file>qml/Proton/TextArea.qml</file>
         <file>qml/Proton/TextField.qml</file>
         <file>qml/Proton/Toggle.qml</file>
+        <file>qml/QuestionItem.qml</file>
+        <file>qml/Resources/bug_report_flow.json</file>
+        <file>qml/Resources/Help/Template.html</file>
+        <file>qml/Resources/Help/WhyBridge.html</file>
+        <file>qml/Resources/Help/WhyCertificate.html</file>
+        <file>qml/Resources/Help/WhyProfileWarning.html</file>
         <file>qml/SettingsItem.qml</file>
         <file>qml/SettingsView.qml</file>
-        <file>qml/SetupGuide.qml</file>
-        <file>qml/SignIn.qml</file>
+        <file>qml/SetupWizard/ClientListItem.qml</file>
+        <file>qml/SetupWizard/LeftPane.qml</file>
+        <file>qml/SetupWizard/ClientConfigAppleMail.qml</file>
+        <file>qml/SetupWizard/ClientConfigEnd.qml</file>
+        <file>qml/SetupWizard/ClientConfigParameters.qml</file>
+        <file>qml/SetupWizard/ClientConfigSelector.qml</file>
+        <file>qml/SetupWizard/HelpButton.qml</file>
+        <file>qml/SetupWizard/SetupWizard.qml</file>
+        <file>qml/SetupWizard/Login.qml</file>
+        <file>qml/SetupWizard/Onboarding.qml</file>
+        <file>qml/SetupWizard/StepDescriptionBox.qml</file>
         <file>qml/ConnectionModeSettings.qml</file>
         <file>qml/SplashScreen.qml</file>
         <file>qml/Status.qml</file>
-        <file>qml/StatusWindow.qml</file>
-        <file>qml/tests/Buttons.qml</file>
-        <file>qml/tests/ButtonsColumn.qml</file>
-        <file>qml/tests/CheckBoxes.qml</file>
-        <file>qml/tests/ComboBoxes.qml</file>
-        <file>qml/tests/RadioButtons.qml</file>
-        <file>qml/tests/Switches.qml</file>
-        <file>qml/tests/Test.qml</file>
-        <file>qml/tests/TestComponents.qml</file>
-        <file>qml/tests/TextAreas.qml</file>
-        <file>qml/tests/TextFields.qml</file>
-        <file>qml/WelcomeGuide.qml</file>
     </qresource>
 </RCC>

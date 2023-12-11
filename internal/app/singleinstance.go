@@ -34,17 +34,17 @@ import (
 //
 // For macOS and Linux when already running version is older than this instance
 // it will kill old and continue with this new bridge (i.e. no error returned).
-func checkSingleInstance(lockFilePath string, curVersion *semver.Version) (*os.File, error) {
+func checkSingleInstance(settingPath, lockFilePath string, curVersion *semver.Version) (*os.File, error) {
 	if lock, err := singleinstance.CreateLockFile(lockFilePath); err == nil {
 		logrus.WithField("path", lockFilePath).Debug("Created lock file; no other instance is running")
 		return lock, nil
 	}
 
-	logrus.Debug("Failed to create lock file; another instance is running")
+	logrus.Warn("Failed to create lock file; another instance is running")
 
 	// We couldn't create the lock file, so another instance is probably running.
 	// Check if it's an older version of the app.
-	lastVersion, ok := focus.TryVersion()
+	lastVersion, ok := focus.TryVersion(settingPath)
 	if !ok {
 		return nil, fmt.Errorf("failed to determine version of running instance")
 	}

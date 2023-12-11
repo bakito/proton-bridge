@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Proton Mail Bridge.  If not, see <https://www.gnu.org/licenses/>.
 
-//go:build !build_qa
+//go:build !build_qa && !test_integration
 
 package bridge
 
@@ -23,6 +23,7 @@ import (
 	"net/http"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/go-proton-api"
 )
 
@@ -32,7 +33,7 @@ func newAPIOptions(
 	version *semver.Version,
 	cookieJar http.CookieJar,
 	transport http.RoundTripper,
-	poolSize int,
+	panicHandler async.PanicHandler,
 ) []proton.Option {
-	return defaultAPIOptions(apiURL, version, cookieJar, transport, poolSize)
+	return defaultAPIOptions(apiURL, version, cookieJar, transport, panicHandler)
 }

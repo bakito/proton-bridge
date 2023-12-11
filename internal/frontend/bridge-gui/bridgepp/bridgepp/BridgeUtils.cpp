@@ -71,20 +71,20 @@ std::mt19937_64 &rng() {
 QString userConfigDir() {
     QString dir;
 #ifdef Q_OS_WIN
-    dir = qgetenv ("AppData");
+    dir = qEnvironmentVariable("AppData");
     if (dir.isEmpty())
         throw Exception("%AppData% is not defined.");
 #elif defined(Q_OS_IOS) || defined(Q_OS_DARWIN)
-    dir = qgetenv("HOME");
+    dir = qEnvironmentVariable("HOME");
     if (dir.isEmpty()) {
         throw Exception("$HOME is not defined.");
     }
     dir += "/Library/Application Support";
 #else
-    dir = qgetenv ("XDG_CONFIG_HOME");
+    dir = qEnvironmentVariable("XDG_CONFIG_HOME");
     if (dir.isEmpty())
     {
-        dir = qgetenv ("HOME");
+        dir = qEnvironmentVariable("HOME");
         if (dir.isEmpty())
             throw Exception("neither $XDG_CONFIG_HOME nor $HOME are defined");
         dir += "/.config";
@@ -104,20 +104,20 @@ QString userCacheDir() {
     QString dir;
 
 #ifdef Q_OS_WIN
-    dir = qgetenv ("LocalAppData");
+    dir = qEnvironmentVariable("LocalAppData");
     if (dir.isEmpty())
         throw Exception("%LocalAppData% is not defined.");
 #elif defined(Q_OS_IOS) || defined(Q_OS_DARWIN)
-    dir = qgetenv("HOME");
+    dir = qEnvironmentVariable("HOME");
     if (dir.isEmpty()) {
         throw Exception("$HOME is not defined.");
     }
     dir += "/Library/Caches";
 #else
-    dir = qgetenv ("XDG_CACHE_HOME");
+    dir = qEnvironmentVariable("XDG_CACHE_HOME");
     if (dir.isEmpty())
     {
-        dir = qgetenv ("HOME");
+        dir = qEnvironmentVariable("HOME");
         if (dir.isEmpty())
             throw Exception("neither $XDG_CACHE_HOME nor $HOME are defined");
         dir += "/.cache";
@@ -138,10 +138,10 @@ QString userDataDir() {
     QString folder;
 
 #ifdef Q_OS_LINUX
-    QString dir = qgetenv ("XDG_DATA_HOME");
+    QString dir = qEnvironmentVariable("XDG_DATA_HOME");
     if (dir.isEmpty())
     {
-        dir = qgetenv ("HOME");
+        dir = qEnvironmentVariable("HOME");
         if (dir.isEmpty())
             throw Exception("neither $XDG_DATA_HOME nor $HOME are defined");
         dir += "/.local/share";
@@ -149,20 +149,10 @@ QString userDataDir() {
     folder = QDir(dir).absoluteFilePath(configFolder);
     QDir().mkpath(folder);
 #else
-    folder = userCacheDir();
+    folder = userConfigDir();
 #endif
 
     return folder;
-}
-
-
-//****************************************************************************************************************************************************
-/// \return user logs directory used by bridge.
-//****************************************************************************************************************************************************
-QString userLogsDir() {
-    QString const path = QDir(userDataDir()).absoluteFilePath("logs");
-    QDir().mkpath(path);
-    return path;
 }
 
 
@@ -218,23 +208,35 @@ QString randomLastName() {
 
 
 //****************************************************************************************************************************************************
-//
+/// \param[in] firstName The user's first name. If empty, a random common US first name is used.
+/// \param[in] lastName The user's last name. If empty, a random common US last name is used.
+/// \return The user
 //****************************************************************************************************************************************************
-SPUser randomUser() {
+SPUser randomUser(QString const &firstName, QString const &lastName) {
     SPUser user = User::newUser(nullptr);
     user->setID(QUuid::createUuid().toString());
-    QString const firstName = randomFirstName();
-    QString const lastName = randomLastName();
-    QString const username = QString("%1.%2").arg(firstName.toLower(), lastName.toLower());
+    QString const first = firstName.isEmpty() ? randomFirstName() : firstName;
+    QString const last = lastName.isEmpty() ? randomLastName() : lastName;
+    QString const username = QString("%1.%2").arg(first.toLower(), last.toLower());
     user->setUsername(username);
     user->setAddresses(QStringList() << (username + "@proton.me") << (username + "@protonmail.com"));
-    user->setPassword(QUuid().createUuid().toString(QUuid::StringFormat::WithoutBraces).left(20));
+    user->setPassword(QUuid::createUuid().toString(QUuid::StringFormat::WithoutBraces).left(20));
     user->setAvatarText(firstName.left(1) + lastName.left(1));
     user->setState(UserState::Connected);
     user->setSplitMode(false);
     qint64 const totalBytes = (500 + randN(2501)) * 1000000;
     user->setUsedBytes(float(bridgepp::randN(totalBytes + 1)) * 1.05f); // we maybe slightly over quota
     user->setTotalBytes(float(totalBytes));
+    return user;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The default user. The name Eric Norbert is used on the proton.me website, and should be used for screenshots.
+//****************************************************************************************************************************************************
+SPUser defaultUser() {
+    SPUser user = randomUser("Eric", "Norbert");
+    user->setAddresses({"eric.norbert@proton.me", "eric_norbert_writes@protonmail.com"}); // we override the address list with addresses commonly used on screenshots proton.me
     return user;
 }
 
@@ -277,6 +279,22 @@ bool onMacOS() {
 //****************************************************************************************************************************************************
 bool onWindows() {
     return OS::Windows == os();
+}
+
+
+//****************************************************************************************************************************************************
+/// Elision is performed by inserting '...' around the (maxLen / 2) - 2 left-most and right-most characters of the string.
+///
+/// \return The elided string, or the original string if its length does not exceed maxLength.
+//****************************************************************************************************************************************************
+QString elideLongString(QString const &str, qint32 maxLength) {
+    qint32 const len = str.length();
+    if (len <= maxLength) {
+        return str;
+    }
+
+    qint32 const hLen = qMax(0, (maxLength / 2) - 2);
+    return str.left(hLen) + "..." + str.right(hLen);
 }
 
 

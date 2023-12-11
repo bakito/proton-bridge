@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge/mocks"
@@ -24,6 +25,7 @@ type Mocks struct {
 
 	CrashHandler *mocks.MockPanicHandler
 	Reporter     *mocks.MockReporter
+	Heartbeat    *mocks.MockHeartbeatManager
 }
 
 func NewMocks(tb testing.TB, version, minAuto *semver.Version) *Mocks {
@@ -39,13 +41,18 @@ func NewMocks(tb testing.TB, version, minAuto *semver.Version) *Mocks {
 
 		CrashHandler: mocks.NewMockPanicHandler(ctl),
 		Reporter:     mocks.NewMockReporter(ctl),
+		Heartbeat:    mocks.NewMockHeartbeatManager(ctl),
 	}
 
 	// When getting the TLS issue channel, we want to return the test channel.
 	mocks.TLSReporter.EXPECT().GetTLSIssueCh().Return(mocks.TLSIssueCh).AnyTimes()
 
-	// This is called at he end of any go-routine:
-	mocks.CrashHandler.EXPECT().HandlePanic().AnyTimes()
+	// This is called at the end of any go-routine:
+	mocks.CrashHandler.EXPECT().HandlePanic(gomock.Any()).AnyTimes()
+
+	// this is called at start of heartbeat process.
+	mocks.Heartbeat.EXPECT().IsTelemetryAvailable(gomock.Any()).AnyTimes()
+	mocks.Heartbeat.EXPECT().GetHeartbeatPeriodicInterval().AnyTimes().Return(500 * time.Millisecond)
 
 	return mocks
 }
@@ -139,13 +146,17 @@ func (testUpdater *TestUpdater) SetLatestVersion(version, minAuto *semver.Versio
 	}
 }
 
-func (testUpdater *TestUpdater) GetVersionInfo(ctx context.Context, downloader updater.Downloader, channel updater.Channel) (updater.VersionInfo, error) {
+func (testUpdater *TestUpdater) GetVersionInfo(_ context.Context, _ updater.Downloader, _ updater.Channel) (updater.VersionInfo, error) {
 	testUpdater.lock.RLock()
 	defer testUpdater.lock.RUnlock()
 
 	return testUpdater.latest, nil
 }
 
-func (testUpdater *TestUpdater) InstallUpdate(ctx context.Context, downloader updater.Downloader, update updater.VersionInfo) error {
+func (testUpdater *TestUpdater) InstallUpdate(_ context.Context, _ updater.Downloader, _ updater.VersionInfo) error {
+	return nil
+}
+
+func (testUpdater *TestUpdater) RemoveOldUpdates() error {
 	return nil
 }

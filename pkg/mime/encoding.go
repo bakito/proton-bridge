@@ -25,6 +25,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/ProtonMail/gluon/rfc5322"
 	"github.com/ProtonMail/gluon/rfc822"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/pkg/errors"
@@ -37,6 +38,7 @@ import (
 func init() {
 	rfc822.ParseMediaType = ParseMediaType
 	proton.CharsetReader = CharsetReader
+	rfc5322.CharsetReader = CharsetReader
 }
 
 func CharsetReader(charset string, input io.Reader) (io.Reader, error) {
@@ -203,7 +205,7 @@ func EncodeHeader(s string) string {
 	return mime.QEncoding.Encode("utf-8", s)
 }
 
-// DecodeCharset decodes the orginal using content type parameters.
+// DecodeCharset decodes the original using content type parameters.
 // If the charset parameter is missing it checks that the content is valid utf8.
 // If it isn't, it checks if it's embedded in the html/xml.
 // If it isn't, it falls back to windows-1252.
@@ -238,7 +240,7 @@ func DecodeCharset(original []byte, contentType string) ([]byte, error) {
 		logrus.WithField("encoding", name).Warn("Determined encoding but was not certain")
 	}
 
-	// Reencode as UTF-8.
+	// Re-encode as UTF-8.
 	decoded, err := encoding.NewDecoder().Bytes(original)
 	if err != nil {
 		return original, errors.Wrap(err, "failed to decode as windows-1252")
@@ -253,7 +255,20 @@ func DecodeCharset(original []byte, contentType string) ([]byte, error) {
 }
 
 // ParseMediaType from MIME doesn't support RFC2231 for non asci / utf8 encodings so we have to pre-parse it.
-func ParseMediaType(v string) (mediatype string, params map[string]string, err error) {
-	v, _ = changeEncodingAndKeepLastParamDefinition(v)
-	return mime.ParseMediaType(v)
+func ParseMediaType(v string) (string, map[string]string, error) {
+	if v == "" {
+		return "", nil, errors.New("empty media type")
+	}
+	decoded, err := DecodeHeader(v)
+	if err != nil {
+		logrus.WithField("value", v).WithField("pkg", "mime").WithError(err).Error("Cannot decode Headers.")
+		return "", nil, err
+	}
+	v, _ = changeEncodingAndKeepLastParamDefinition(decoded)
+	mediatype, params, err := mime.ParseMediaType(v)
+	if err != nil {
+		logrus.WithField("value", v).WithField("pkg", "mime").WithError(err).Error("Media Type parsing error.")
+		return "", nil, err
+	}
+	return mediatype, params, err
 }

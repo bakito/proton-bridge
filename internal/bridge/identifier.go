@@ -17,10 +17,58 @@
 
 package bridge
 
+import "github.com/sirupsen/logrus"
+
 func (bridge *Bridge) GetCurrentUserAgent() string {
 	return bridge.identifier.GetUserAgent()
 }
 
 func (bridge *Bridge) SetCurrentPlatform(platform string) {
 	bridge.identifier.SetPlatform(platform)
+}
+
+func (bridge *Bridge) setUserAgent(name, version string) {
+	currentUserAgent := bridge.identifier.GetClientString()
+
+	bridge.identifier.SetClient(name, version)
+
+	newUserAgent := bridge.identifier.GetClientString()
+
+	if currentUserAgent != newUserAgent {
+		if err := bridge.vault.SetLastUserAgent(newUserAgent); err != nil {
+			logrus.WithError(err).Error("Failed to write new user agent to vault")
+		}
+	}
+}
+
+type bridgeUserAgentUpdater struct {
+	*Bridge
+}
+
+func (b *bridgeUserAgentUpdater) GetUserAgent() string {
+	return b.identifier.GetUserAgent()
+}
+
+func (b *bridgeUserAgentUpdater) HasClient() bool {
+	return b.identifier.HasClient()
+}
+
+func (b *bridgeUserAgentUpdater) SetClient(name, version string) {
+	b.identifier.SetClient(name, version)
+}
+
+func (b *bridgeUserAgentUpdater) SetPlatform(platform string) {
+	b.identifier.SetPlatform(platform)
+}
+
+func (b *bridgeUserAgentUpdater) SetClientString(client string) {
+	b.identifier.SetClientString(client)
+}
+
+func (b *bridgeUserAgentUpdater) GetClientString() string {
+	return b.identifier.GetClientString()
+}
+
+func (b *bridgeUserAgentUpdater) SetUserAgent(name, version string) {
+	b.setUserAgent(name, version)
 }

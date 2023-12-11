@@ -38,7 +38,7 @@ public: // member functions.
     UsersTab &operator=(UsersTab &&) = delete; ///< Disabled move assignment operator.
     UserTable &userTable(); ///< Returns a reference to the user table.
     bridgepp::SPUser userWithID(QString const &userID); ///< Get the user with the given ID.
-    bridgepp::SPUser userWithUsername(QString const &username); ///< Get the user with the given username.
+    bridgepp::SPUser userWithUsernameOrEmail(QString const &username); ///< Get the user with the given username.
     bool nextUserUsernamePasswordError() const; ///< Check if next user login should trigger a username/password error.
     bool nextUserFreeUserError() const; ///< Check if next user login should trigger a Free user error.
     bool nextUserTFARequired() const; ///< Check if next user login should requires 2FA.
@@ -54,12 +54,18 @@ public slots:
     void logoutUser(QString const &userID); ///< slot for the logging out of a user.
     void removeUser(QString const &userID); ///< Slot for the removal of a user.
     void configureUserAppleMail(QString const &userID, QString const &address); ///< Slot for the configuration of Apple mail.
+    void processBadEventUserFeedback(QString const& userID, bool doResync); ///< Slot for the reception of a bad event user feedback.
 
 private slots:
     void onAddUserButton(); ///< Add a user to the user list.
     void onEditUserButton(); ///< Edit the currently selected user.
     void onRemoveUserButton(); ///< Remove the currently selected user.
     void onSelectionChanged(QItemSelection, QItemSelection); ///< Slot for the change of the selection.
+    void onSendUserBadEvent(); ///< Slot for the 'Send Bad Event Error' button.
+    void onSendUsedBytesChangedEvent(); ///< Slot for the 'Send Used Bytes Changed Event' button.
+    void onSendIMAPLoginFailedEvent(); ///< Slot for the 'Send IMAP Login failure Event' button.
+    void onCheckSyncToggled(bool checked); ///< Slot for the 'Synchronizing' check box.
+    void onSliderSyncValueChanged(int value); ///< Slot for the sync 'Progress' slider.
     void updateGUIState(); ///< Update the GUI state.
 
 private: // member functions.

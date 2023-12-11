@@ -17,22 +17,34 @@
 
 
 #include "QMLBackend.h"
+#include "BuildConfig.h"
 #include "EventStreamWorker.h"
-#include "Version.h"
-#include <bridgepp/GRPC/GRPCClient.h>
+#include <bridgepp/BridgeUtils.h>
 #include <bridgepp/Exception/Exception.h>
+#include <bridgepp/Log/LogUtils.h>
+#include <bridgepp/GRPC/GRPCClient.h>
 #include <bridgepp/Worker/Overseer.h>
 
 
 #define HANDLE_EXCEPTION(x) try { x } \
-    catch (Exception const &e) { emit fatalError(__func__, e.qwhat()); } \
-    catch (...)  { emit fatalError(__func__, QString("An unknown exception occurred")); }
+    catch (Exception const &e) { emit fatalError(e); } \
+    catch (...)  { emit fatalError(Exception("An unknown exception occurred", QString(), __func__)); }
 #define HANDLE_EXCEPTION_RETURN_BOOL(x) HANDLE_EXCEPTION(x) return false;
 #define HANDLE_EXCEPTION_RETURN_QSTRING(x) HANDLE_EXCEPTION(x) return QString();
 #define HANDLE_EXCEPTION_RETURN_ZERO(x) HANDLE_EXCEPTION(x) return 0;
 
 
 using namespace bridgepp;
+
+
+namespace {
+
+
+QString const bugReportFile = ":qml/Resources/bug_report_flow.json";
+QString const bridgeKBUrl = "https://proton.me/support/bridge"; ///< The URL for the root of the bridge knowledge base.
+
+
+}
 
 
 //****************************************************************************************************************************************************
@@ -47,6 +59,9 @@ QMLBackend::QMLBackend()
 /// \param[in] serviceConfig
 //****************************************************************************************************************************************************
 void QMLBackend::init(GRPCConfig const &serviceConfig) {
+    trayIcon_.reset(new TrayIcon());
+    this->setNormalTrayIcon();
+
     connect(this, &QMLBackend::fatalError, &app(), &AppController::onFatalError);
 
     users_ = new UserList(this);
@@ -56,12 +71,8 @@ void QMLBackend::init(GRPCConfig const &serviceConfig) {
     app().grpc().setLog(&log);
     this->connectGrpcEvents();
 
-    QString error;
-    if (app().grpc().connectToServer(serviceConfig, app().bridgeMonitor(), error)) {
-        app().log().info("Connected to backend via gRPC service.");
-    } else {
-        throw Exception(QString("Cannot connectToServer to go backend via gRPC: %1").arg(error));
-    }
+    app().grpc().connectToServer(app().sessionID(), bridgepp::userConfigDir(), serviceConfig, app().bridgeMonitor());
+    app().log().info("Connected to backend via gRPC service.");
 
     QString bridgeVer;
     app().grpc().version(bridgeVer);
@@ -77,7 +88,6 @@ void QMLBackend::init(GRPCConfig const &serviceConfig) {
     });
 
     // Grab from bridge the value that will not change during the execution of this app (or that will only change locally).
-    app().grpc().showSplashScreen(showSplashScreen_);
     app().grpc().goos(goos_);
     app().grpc().logsPath(logsPath_);
     app().grpc().licensePath(licensePath_);
@@ -89,6 +99,8 @@ void QMLBackend::init(GRPCConfig const &serviceConfig) {
     this->setUseSSLForIMAP(sslForIMAP);
     this->setUseSSLForSMTP(sslForSMTP);
     this->retrieveUserList();
+    if (!reportFlow_.parse(bugReportFile))
+        app().log().error(QString("Cannot parse BugReportFlow description file: %1").arg(bugReportFile));
 }
 
 
@@ -99,6 +111,68 @@ void QMLBackend::init(GRPCConfig const &serviceConfig) {
 //****************************************************************************************************************************************************
 bool QMLBackend::waitForEventStreamReaderToFinish(qint32 timeoutMs) {
     return eventStreamOverseer_->wait(timeoutMs);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The list of users
+//****************************************************************************************************************************************************
+UserList const &QMLBackend::users() const {
+    return *users_;
+}
+
+//****************************************************************************************************************************************************
+/// \return the if bridge considers internet is on.
+//****************************************************************************************************************************************************
+bool QMLBackend::isInternetOn() const {
+    return isInternetOn_;
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] reason The reason for the request.
+//****************************************************************************************************************************************************
+void QMLBackend::showMainWindow(QString const&reason) {
+    app().log().debug(QString("main window show requested: %1").arg(reason));
+    emit showMainWindow();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] reason The reason for the request.
+//****************************************************************************************************************************************************
+void QMLBackend::showHelp(QString const&reason) {
+    app().log().debug(QString("main window show requested (help page): %1").arg(reason));
+    emit showHelp();
+}
+
+//****************************************************************************************************************************************************
+/// \param[in] reason The reason for the request.
+//****************************************************************************************************************************************************
+void QMLBackend::showSettings(QString const&reason) {
+    app().log().debug(QString("main window show requested (settings page): %1").arg(reason));
+    emit showSettings();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] forceShowWindow Should the window be force to display.
+/// \param[in] reason The reason for the request.
+//****************************************************************************************************************************************************
+void QMLBackend::selectUser(QString const &userID, bool forceShowWindow, QString const &reason) {
+    if (forceShowWindow) {
+        app().log().debug(QString("main window show requested (user page): %1").arg(reason));
+    }
+    emit selectUser(userID, forceShowWindow);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The build year as a string (e.g. 2023)
+//****************************************************************************************************************************************************
+QString QMLBackend::buildYear() {
+    return QString(__DATE__).right(4);
 }
 
 
@@ -149,6 +223,87 @@ bool QMLBackend::areSameFileOrFolder(QUrl const &lhs, QUrl const &rhs) const {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] categoryId The id of the bug category.
+/// \return Set of question for this category.
+//****************************************************************************************************************************************************
+QString QMLBackend::getBugCategory(quint8 categoryId) const {
+    return reportFlow_.getCategory(categoryId);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] categoryId The id of the bug category.
+/// \return Set of question for this category.
+//****************************************************************************************************************************************************
+QVariantList QMLBackend::getQuestionSet(quint8 categoryId) const {
+    QVariantList list = reportFlow_.questionSet(categoryId);
+    if (list.count() == 0)
+        app().log().error(QString("Bug category not found (id: %1)").arg(categoryId));
+    return list;
+};
+
+
+//****************************************************************************************************************************************************
+/// \param[in] questionId The id of the question.
+/// \param[in] answer     The answer to that question.
+//****************************************************************************************************************************************************
+void QMLBackend::setQuestionAnswer(quint8 questionId, QString const &answer) {
+    if (!reportFlow_.setAnswer(questionId, answer))
+        app().log().error(QString("Bug Report Question not found (id: %1)").arg(questionId));
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] questionId The id of the question.
+/// \return answer for the given question.
+//****************************************************************************************************************************************************
+QString QMLBackend::getQuestionAnswer(quint8 questionId) const {
+    return reportFlow_.getAnswer(questionId);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] categoryId The id of the question set.
+/// \return concatenate answers for set of questions.
+//****************************************************************************************************************************************************
+QString QMLBackend::collectAnswers(quint8 categoryId) const {
+    return reportFlow_.collectAnswers(categoryId);
+}
+
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void QMLBackend::clearAnswers() {
+    reportFlow_.clearAnswers();
+}
+
+
+//****************************************************************************************************************************************************
+/// \return true iff the Bridge TLS certificate is installed.
+//****************************************************************************************************************************************************
+bool QMLBackend::isTLSCertificateInstalled() {
+    HANDLE_EXCEPTION_RETURN_BOOL(
+        bool v = false;
+        app().grpc().isTLSCertificateInstalled(v);
+        return v;
+    )
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] url The URL of the knowledge base article. If empty/invalid, the home page for the Bridge knowledge base is opened.
+//****************************************************************************************************************************************************
+void QMLBackend::openExternalLink(QString const &url) {
+    HANDLE_EXCEPTION(
+        QString const u = url.isEmpty() ? bridgeKBUrl : url;
+        QDesktopServices::openUrl(u);
+        emit notifyExternalLinkClicked(u);
+    )
+}
+
+
+//****************************************************************************************************************************************************
 /// \return The value for the 'showOnStartup' property.
 //****************************************************************************************************************************************************
 bool QMLBackend::showOnStartup() const {
@@ -174,21 +329,21 @@ void QMLBackend::setShowSplashScreen(bool show) {
 
 
 //****************************************************************************************************************************************************
-/// \return The value for the 'showSplashScreen' property.
-//****************************************************************************************************************************************************
-bool QMLBackend::showSplashScreen() const {
-    HANDLE_EXCEPTION_RETURN_BOOL(
-        return showSplashScreen_;
-    )
-}
-
-
-//****************************************************************************************************************************************************
 /// \return The value for the 'GOOS' property.
 //****************************************************************************************************************************************************
 QString QMLBackend::goos() const {
     HANDLE_EXCEPTION_RETURN_QSTRING(
         return goos_;
+    )
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The value for the 'showSplashScreen' property.
+//****************************************************************************************************************************************************
+bool QMLBackend::showSplashScreen() const {
+    HANDLE_EXCEPTION_RETURN_BOOL(
+        return showSplashScreen_;
     )
 }
 
@@ -270,13 +425,22 @@ QString QMLBackend::vendor() const {
 
 
 //****************************************************************************************************************************************************
-/// \return The value for the 'vendor' property.
+/// \return The value for the 'version' property.
 //****************************************************************************************************************************************************
 QString QMLBackend::version() const {
     HANDLE_EXCEPTION_RETURN_QSTRING(
         QString version;
         app().grpc().version(version);
         return version;
+    )
+}
+
+//****************************************************************************************************************************************************
+/// \return The value for the 'tag' property.
+//****************************************************************************************************************************************************
+QString QMLBackend::tag() const {
+    HANDLE_EXCEPTION_RETURN_QSTRING(
+        return QString(PROJECT_TAG);
     )
 }
 
@@ -324,6 +488,18 @@ bool QMLBackend::isAllMailVisible() const {
     HANDLE_EXCEPTION_RETURN_BOOL(
         bool v;
         app().grpc().isAllMailVisible(v);
+        return v;
+    )
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The value for the 'isAllMailVisible' property.
+//****************************************************************************************************************************************************
+bool QMLBackend::isTelemetryDisabled() const {
+    HANDLE_EXCEPTION_RETURN_BOOL(
+        bool v;
+        app().grpc().isTelemetryDisabled(v);
         return v;
     )
 }
@@ -462,18 +638,6 @@ bool QMLBackend::isDoHEnabled() const {
 
 
 //****************************************************************************************************************************************************
-/// \return The value for the 'isFirstGUIStart' property.
-//****************************************************************************************************************************************************
-bool QMLBackend::isFirstGUIStart() const {
-    HANDLE_EXCEPTION_RETURN_BOOL(
-        bool v;
-        app().grpc().isFirstGUIStart(v);
-        return v;
-    )
-}
-
-
-//****************************************************************************************************************************************************
 /// \return The value for the 'isAutomaticUpdateOn' property.
 //****************************************************************************************************************************************************
 bool QMLBackend::isAutomaticUpdateOn() const {
@@ -507,6 +671,21 @@ QStringList QMLBackend::availableKeychain() const {
         return keychains;
     )
     return QStringList();
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The value for the 'bugCategories' property.
+//****************************************************************************************************************************************************
+QVariantList QMLBackend::bugCategories() const {
+    return reportFlow_.categories();
+}
+
+//****************************************************************************************************************************************************
+/// \return The value for the 'bugQuestions' property.
+//****************************************************************************************************************************************************
+QVariantList QMLBackend::bugQuestions() const {
+    return reportFlow_.questions();
 }
 
 
@@ -576,6 +755,17 @@ void QMLBackend::changeIsAllMailVisible(bool isVisible) {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] isDisabled The new state of the 'Is telemetry disabled property'.
+//****************************************************************************************************************************************************
+void QMLBackend::toggleIsTelemetryDisabled(bool isDisabled) {
+    HANDLE_EXCEPTION(
+        app().grpc().setIsTelemetryDisabled(isDisabled);
+        emit isTelemetryDisabledChanged(isDisabled);
+    )
+}
+
+
+//****************************************************************************************************************************************************
 /// \param[in] scheme the scheme name
 //****************************************************************************************************************************************************
 void QMLBackend::changeColorScheme(QString const &scheme) {
@@ -603,7 +793,8 @@ void QMLBackend::setDiskCachePath(QUrl const &path) const {
 void QMLBackend::login(QString const &username, QString const &password) const {
     HANDLE_EXCEPTION(
         if (username.compare("coco@bandicoot", Qt::CaseInsensitive) == 0) {
-            throw Exception("User requested bridge-gui to crash by trying to log as coco@bandicoot");
+            throw Exception("User requested bridge-gui to crash by trying to log as coco@bandicoot",
+                "This error exists for test purposes and should be ignored.", __func__, tailOfLatestBridgeLog(app().sessionID()));
         }
         app().grpc().login(username, password);
     )
@@ -691,9 +882,11 @@ void QMLBackend::changeKeychain(QString const &keychain) {
 //****************************************************************************************************************************************************
 //
 //****************************************************************************************************************************************************
-void QMLBackend::guiReady() const {
+void QMLBackend::guiReady() {
     HANDLE_EXCEPTION(
-        app().grpc().guiReady();
+        bool showSplashScreen;
+        app().grpc().guiReady(showSplashScreen);
+        this->setShowSplashScreen(showSplashScreen);
     )
 }
 
@@ -760,17 +953,27 @@ void QMLBackend::triggerReset() const {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] category The category of the bug.
 /// \param[in] description The description of the bug.
 /// \param[in] address The email address.
 /// \param[in] emailClient The email client.
 /// \param[in] includeLogs Should the logs be included in the report.
 //****************************************************************************************************************************************************
-void QMLBackend::reportBug(QString const &description, QString const &address, QString const &emailClient, bool includeLogs) const {
+void QMLBackend::reportBug(QString const &category, QString const &description, QString const &address, QString const &emailClient, bool includeLogs) const {
     HANDLE_EXCEPTION(
-        app().grpc().reportBug(description, address, emailClient, includeLogs);
+        app().grpc().reportBug(category, description, address, emailClient, includeLogs);
     )
 }
 
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void QMLBackend::installTLSCertificate() {
+    HANDLE_EXCEPTION(
+        app().grpc().installTLSCertificate();
+    )
+}
 
 //****************************************************************************************************************************************************
 //
@@ -817,6 +1020,113 @@ void QMLBackend::onVersionChanged() {
 void QMLBackend::setMailServerSettings(int imapPort, int smtpPort, bool useSSLForIMAP, bool useSSLForSMTP) const {
     HANDLE_EXCEPTION(
         app().grpc().setMailServerSettings(imapPort, smtpPort, useSSLForIMAP, useSSLForSMTP);
+    )
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] doResync Did the user request a resync.
+//****************************************************************************************************************************************************
+void QMLBackend::sendBadEventUserFeedback(QString const &userID, bool doResync) {
+    HANDLE_EXCEPTION(
+        app().grpc().sendBadEventUserFeedback(userID, doResync);
+
+        // Notification dialog has just been dismissed, we remove the userID from the queue, and if there are other events in the queue, we show
+        // the dialog again.
+        badEventDisplayQueue_.removeOne(userID);
+        if (!badEventDisplayQueue_.isEmpty()) {
+            // we introduce a small delay here, so that the user notices the dialog disappear and pops up again.
+            QTimer::singleShot(500, [&]() { this->displayBadEventDialog(badEventDisplayQueue_.front()); });
+        }
+    )
+}
+
+//****************************************************************************************************************************************************
+///
+//****************************************************************************************************************************************************
+void QMLBackend::notifyReportBugClicked() const {
+    HANDLE_EXCEPTION(
+            app().grpc().reportBugClicked();
+    )
+}
+//****************************************************************************************************************************************************
+/// \param[in] client The selected Mail client for autoconfig.
+//****************************************************************************************************************************************************
+void QMLBackend::notifyAutoconfigClicked(QString const &client) const {
+    HANDLE_EXCEPTION(
+            app().grpc().autoconfigClicked(client);
+    )
+}
+
+//****************************************************************************************************************************************************
+/// \param[in] article The url of the KB article.
+//****************************************************************************************************************************************************
+void QMLBackend::notifyExternalLinkClicked(QString const &article) const {
+    HANDLE_EXCEPTION(
+            app().grpc().externalLinkClicked(article);
+    )
+}
+
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void QMLBackend::setNormalTrayIcon() {
+    if (trayIcon_) {
+        trayIcon_->setState(TrayIcon::State::Normal, tr("Connected"), ":/qml/icons/ic-connected.svg");
+    }
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] stateString A string describing the state.
+/// \param[in] statusIcon The path of the status icon.
+//****************************************************************************************************************************************************
+void QMLBackend::setErrorTrayIcon(QString const &stateString, QString const &statusIcon) {
+    if (trayIcon_) {
+        trayIcon_->setState(TrayIcon::State::Error, stateString, statusIcon);
+    }
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] stateString A string describing the state.
+/// \param[in] statusIcon The path of the status icon.
+//****************************************************************************************************************************************************
+void QMLBackend::setWarnTrayIcon(QString const &stateString, QString const &statusIcon) {
+    if (trayIcon_) {
+        trayIcon_->setState(TrayIcon::State::Warn, stateString, statusIcon);
+    }
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] stateString A string describing the state.
+/// \param[in] statusIcon The path of the status icon.
+//****************************************************************************************************************************************************
+void QMLBackend::setUpdateTrayIcon(QString const &stateString, QString const &statusIcon) {
+    if (trayIcon_) {
+        trayIcon_->setState(TrayIcon::State::Update, stateString, statusIcon);
+    }
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] isOn Does bridge consider internet as on.
+//****************************************************************************************************************************************************
+void QMLBackend::internetStatusChanged(bool isOn) {
+    HANDLE_EXCEPTION(
+        if (isInternetOn_ == isOn) {
+            return;
+        }
+
+        isInternetOn_ = isOn;
+        if (isOn) {
+            emit internetOn();
+        } else {
+            emit internetOff();
+        }
     )
 }
 
@@ -873,6 +1183,77 @@ void QMLBackend::onLoginAlreadyLoggedIn(QString const &userID) {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+//****************************************************************************************************************************************************
+void QMLBackend::onUserBadEvent(QString const &userID, QString const &) {
+    HANDLE_EXCEPTION(
+        if (badEventDisplayQueue_.contains(userID)) {
+            app().log().error("Received 'bad event' for a user that is already in the queue.");
+            return;
+        }
+
+        SPUser const user = users_->getUserWithID(userID);
+        if (!user) {
+            app().log().error(QString("Received bad event for unknown user %1."));
+        }
+
+        badEventDisplayQueue_.append(userID);
+        if (badEventDisplayQueue_.size() == 1) { // there was no other item is the queue, we can display the dialog immediately.
+            this->displayBadEventDialog(userID);
+        }
+    )
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] username The username (or primary email address)
+//****************************************************************************************************************************************************
+void QMLBackend::onIMAPLoginFailed(QString const &username) {
+    HANDLE_EXCEPTION(
+        SPUser const user = users_->getUserWithUsernameOrEmail(username);
+        if (!user) {
+            return;
+        }
+
+        qint64 const cooldownDurationMs = 10 * 60 * 1000; // 10 minutes cooldown period for notifications
+        switch (user->state()) {
+        case UserState::SignedOut:
+            if (user->isNotificationInCooldown(User::ENotification::IMAPLoginWhileSignedOut)) {
+                return;
+            }
+            user->startNotificationCooldownPeriod(User::ENotification::IMAPLoginWhileSignedOut, cooldownDurationMs);
+            emit selectUser(user->id(), true);
+            emit imapLoginWhileSignedOut(username);
+            break;
+
+        case UserState::Connected:
+            if (user->isNotificationInCooldown(User::ENotification::IMAPPasswordFailure)) {
+                return;
+            }
+            user->startNotificationCooldownPeriod(User::ENotification::IMAPPasswordFailure, cooldownDurationMs);
+            emit selectUser(user->id(), false);
+            trayIcon_->showErrorPopupNotification(tr("Incorrect password"),
+                tr("Your email client can't connect to Proton Bridge. Make sure you are using the local Bridge password shown in Bridge."));
+            break;
+
+        case UserState::Locked:
+            if (user->isNotificationInCooldown(User::ENotification::IMAPLoginWhileLocked)) {
+                return;
+            }
+            user->startNotificationCooldownPeriod(User::ENotification::IMAPLoginWhileLocked, cooldownDurationMs);
+            emit selectUser(user->id(), false);
+            trayIcon_->showErrorPopupNotification(tr("Connection in progress"),
+                tr("Your Proton account in Bridge is being connected. Please wait or restart Bridge."));
+            break;
+
+        default:
+            break;
+        }
+    )
+}
+
+
+//****************************************************************************************************************************************************
 //
 //****************************************************************************************************************************************************
 void QMLBackend::retrieveUserList() {
@@ -913,18 +1294,20 @@ void QMLBackend::connectGrpcEvents() {
     GRPCClient *client = &app().grpc();
 
     // app events
-    connect(client, &GRPCClient::internetStatus, this, [&](bool isOn) { if (isOn) { emit internetOn(); } else { emit internetOff(); }});
+    connect(client, &GRPCClient::internetStatus, this, &QMLBackend::internetStatusChanged);
     connect(client, &GRPCClient::toggleAutostartFinished, this, &QMLBackend::toggleAutostartFinished);
     connect(client, &GRPCClient::resetFinished, this, &QMLBackend::onResetFinished);
     connect(client, &GRPCClient::reportBugFinished, this, &QMLBackend::reportBugFinished);
     connect(client, &GRPCClient::reportBugSuccess, this, &QMLBackend::bugReportSendSuccess);
+    connect(client, &GRPCClient::reportBugFallback, this, &QMLBackend::bugReportSendFallback);
     connect(client, &GRPCClient::reportBugError, this, &QMLBackend::bugReportSendError);
-    connect(client, &GRPCClient::showMainWindow, this, &QMLBackend::showMainWindow);
+    connect(client, &GRPCClient::certificateInstallSuccess, this, &QMLBackend::certificateInstallSuccess);
+    connect(client, &GRPCClient::certificateInstallCanceled, this, &QMLBackend::certificateInstallCanceled);
+    connect(client, &GRPCClient::certificateInstallFailed, this, &QMLBackend::certificateInstallFailed);
+    connect(client, &GRPCClient::showMainWindow, [&]() { this->showMainWindow("gRPC showMainWindow event"); });
 
     // cache events
-    connect(client, &GRPCClient::diskCacheUnavailable, this, &QMLBackend::diskCacheUnavailable);
     connect(client, &GRPCClient::cantMoveDiskCache, this, &QMLBackend::cantMoveDiskCache);
-    connect(client, &GRPCClient::diskFull, this, &QMLBackend::diskFull);
     connect(client, &GRPCClient::diskCachePathChanged, this, &QMLBackend::diskCachePathChanged);
     connect(client, &GRPCClient::diskCachePathChangeFinished, this, &QMLBackend::diskCachePathChangeFinished);
 
@@ -969,7 +1352,6 @@ void QMLBackend::connectGrpcEvents() {
     connect(client, &GRPCClient::rebuildKeychain, this, &QMLBackend::notifyRebuildKeychain);
 
     // mail events
-    connect(client, &GRPCClient::noActiveKeyForRecipient, this, &QMLBackend::noActiveKeyForRecipient);
     connect(client, &GRPCClient::addressChanged, this, &QMLBackend::addressChanged);
     connect(client, &GRPCClient::addressChangedLogout, this, &QMLBackend::addressChangedLogout);
     connect(client, &GRPCClient::apiCertIssue, this, &QMLBackend::apiCertIssue);
@@ -979,5 +1361,27 @@ void QMLBackend::connectGrpcEvents() {
 
     // user events
     connect(client, &GRPCClient::userDisconnected, this, &QMLBackend::userDisconnected);
+    connect(client, &GRPCClient::userBadEvent, this, &QMLBackend::onUserBadEvent);
+    connect(client, &GRPCClient::imapLoginFailed, this, &QMLBackend::onIMAPLoginFailed);
+
     users_->connectGRPCEvents();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+//****************************************************************************************************************************************************
+void QMLBackend::displayBadEventDialog(QString const &userID) {
+    HANDLE_EXCEPTION(
+        SPUser const user = users_->getUserWithID(userID);
+        if (!user) {
+            return;
+        }
+
+        emit userBadEvent(userID,
+            tr("Bridge ran into an internal error and it is not able to proceed with the account %1. Synchronize your local database now or logout"
+               " to do it later. Synchronization time depends on the size of your mailbox.").arg(elideLongString(user->primaryEmailOrUsername(), 30)));
+        emit selectUser(userID, true);
+        emit showMainWindow();
+    )
 }

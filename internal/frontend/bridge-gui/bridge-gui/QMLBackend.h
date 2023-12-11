@@ -21,8 +21,10 @@
 
 
 #include "MacOS/DockIcon.h"
-#include "Version.h"
+#include "BuildConfig.h"
+#include "TrayIcon.h"
 #include "UserList.h"
+#include <bridgepp/BugReportFlow/BugReportFlow.h>
 #include <bridgepp/GRPC/GRPCClient.h>
 #include <bridgepp/GRPC/GRPCUtils.h>
 #include <bridgepp/Worker/Overseer.h>
@@ -43,12 +45,27 @@ public: // member functions.
     QMLBackend &operator=(QMLBackend &&) = delete; ///< Disabled move assignment operator.
     void init(GRPCConfig const &serviceConfig); ///< Initialize the backend.
     bool waitForEventStreamReaderToFinish(qint32 timeoutMs); ///< Wait for the event stream reader to finish.
+    UserList const& users() const; ///< Return the list of users
+    bool isInternetOn() const; ///< Check if bridge considers internet as on.
+    void showMainWindow(QString const &reason); ///< Show the main window.
+    void showHelp(QString const &reason); ///< Show the help page.
+    void showSettings(QString const &reason); ///< Show the settings page.
+    void selectUser(QString const &userID, bool forceShowWindow, QString const &reason); ///< Select the user and display its account details (or login screen).
 
-    // invokable methods can be called from QML. They generally return a value, which slots cannot do.
+    // invocable methods can be called from QML. They generally return a value, which slots cannot do.
+    Q_INVOKABLE static QString buildYear(); ///< Return the application build year.
     Q_INVOKABLE QPoint getCursorPos() const; ///< Retrieve the cursor position.
     Q_INVOKABLE bool isPortFree(int port) const; ///< Check if a given network port is available.
     Q_INVOKABLE QString nativePath(QUrl const &url) const; ///< Retrieve the native path of a local URL.
     Q_INVOKABLE bool areSameFileOrFolder(QUrl const &lhs, QUrl const &rhs) const; ///< Check if two local URL point to the same file.
+    Q_INVOKABLE QString getBugCategory(quint8 categoryId) const; ///< Get a Category name.
+    Q_INVOKABLE QVariantList getQuestionSet(quint8 categoryId) const; ///< Retrieve the set of question for a given bug category.
+    Q_INVOKABLE void setQuestionAnswer(quint8 questionId, QString const &answer); ///< Feed an answer for a given question.
+    Q_INVOKABLE QString getQuestionAnswer(quint8 questionId) const; ///< Get the answer for a given question.
+    Q_INVOKABLE QString collectAnswers(quint8 categoryId) const; ///< Collect answer for a given set of questions.
+    Q_INVOKABLE void clearAnswers(); ///< Clear all collected answers.
+    Q_INVOKABLE bool isTLSCertificateInstalled(); ///< Check if the bridge certificate is installed in the OS keychain.
+    Q_INVOKABLE void openExternalLink(QString const & url = QString()); ///< Open a knowledge base article.
 
 public: // Qt/QML properties. Note that the NOTIFY-er signal is required even for read-only properties (QML warning otherwise)
     Q_PROPERTY(bool showOnStartup READ showOnStartup NOTIFY showOnStartupChanged)
@@ -62,10 +79,12 @@ public: // Qt/QML properties. Note that the NOTIFY-er signal is required even fo
     Q_PROPERTY(QString appname READ appname NOTIFY appnameChanged)
     Q_PROPERTY(QString vendor READ vendor NOTIFY vendorChanged)
     Q_PROPERTY(QString version READ version NOTIFY versionChanged)
+    Q_PROPERTY(QString tag READ tag NOTIFY tagChanged)
     Q_PROPERTY(QString hostname READ hostname NOTIFY hostnameChanged)
     Q_PROPERTY(bool isAutostartOn READ isAutostartOn NOTIFY isAutostartOnChanged)
     Q_PROPERTY(bool isBetaEnabled READ isBetaEnabled NOTIFY isBetaEnabledChanged)
     Q_PROPERTY(bool isAllMailVisible READ isAllMailVisible NOTIFY isAllMailVisibleChanged)
+    Q_PROPERTY(bool isTelemetryDisabled READ isTelemetryDisabled NOTIFY isTelemetryDisabledChanged)
     Q_PROPERTY(QString colorSchemeName READ colorSchemeName NOTIFY colorSchemeNameChanged)
     Q_PROPERTY(QUrl diskCachePath READ diskCachePath NOTIFY diskCachePathChanged)
     Q_PROPERTY(bool useSSLForIMAP READ useSSLForIMAP WRITE setUseSSLForIMAP NOTIFY useSSLForIMAPChanged)
@@ -73,14 +92,14 @@ public: // Qt/QML properties. Note that the NOTIFY-er signal is required even fo
     Q_PROPERTY(int imapPort READ imapPort WRITE setIMAPPort NOTIFY imapPortChanged)
     Q_PROPERTY(int smtpPort READ smtpPort WRITE setSMTPPort NOTIFY smtpPortChanged)
     Q_PROPERTY(bool isDoHEnabled READ isDoHEnabled NOTIFY isDoHEnabledChanged)
-    Q_PROPERTY(bool isFirstGUIStart READ isFirstGUIStart)
     Q_PROPERTY(bool isAutomaticUpdateOn READ isAutomaticUpdateOn NOTIFY isAutomaticUpdateOnChanged)
     Q_PROPERTY(QString currentEmailClient READ currentEmailClient NOTIFY currentEmailClientChanged)
     Q_PROPERTY(QStringList availableKeychain READ availableKeychain NOTIFY availableKeychainChanged)
     Q_PROPERTY(QString currentKeychain READ currentKeychain NOTIFY currentKeychainChanged)
+    Q_PROPERTY(QVariantList bugCategories READ bugCategories NOTIFY bugCategoriesChanged)
+    Q_PROPERTY(QVariantList bugQuestions READ bugQuestions NOTIFY bugQuestionsChanged)
     Q_PROPERTY(UserList *users MEMBER users_ NOTIFY usersChanged)
     Q_PROPERTY(bool dockIconVisible READ dockIconVisible WRITE setDockIconVisible NOTIFY dockIconVisibleChanged)
-
 
     // Qt Property system setters & getters.
     bool showOnStartup() const; ///< Getter for the 'showOnStartup' property.
@@ -95,10 +114,12 @@ public: // Qt/QML properties. Note that the NOTIFY-er signal is required even fo
     QString appname() const; ///< Getter for the 'appname' property.
     QString vendor() const; ///< Getter for the 'vendor' property.
     QString version() const; ///< Getter for the 'version' property.
+    QString tag() const; ///< Getter for the 'tag' property.
     QString hostname() const; ///< Getter for the 'hostname' property.
     bool isAutostartOn() const; ///< Getter for the 'isAutostartOn' property.
     bool isBetaEnabled() const; ///< Getter for the 'isBetaEnabled' property.
     bool isAllMailVisible() const; ///< Getter for the 'isAllMailVisible' property.
+    bool isTelemetryDisabled() const; ///< Getter for the 'isTelemetryDisabled' property.
     QString colorSchemeName() const; ///< Getter for the 'colorSchemeName' property.
     QUrl diskCachePath() const; ///< Getter for the 'diskCachePath' property.
     void setUseSSLForIMAP(bool value); ///< Setter for the 'useSSLForIMAP' property.
@@ -110,11 +131,12 @@ public: // Qt/QML properties. Note that the NOTIFY-er signal is required even fo
     void setSMTPPort(int port); ///< Setter for the 'smtpPort' property.
     int smtpPort() const; ///< Getter for the 'smtpPort' property.
     bool isDoHEnabled() const; ///< Getter for the 'isDoHEnabled' property.
-    bool isFirstGUIStart() const; ///< Getter for the 'isFirstGUIStart' property.
     bool isAutomaticUpdateOn() const; ///< Getter for the 'isAutomaticUpdateOn' property.
     QString currentEmailClient() const; ///< Getter for the 'currentEmail' property.
     QStringList availableKeychain() const; ///< Getter for the 'availableKeychain' property.
     QString currentKeychain() const; ///< Getter for the 'currentKeychain' property.
+    QVariantList bugCategories() const; ///< Getter for the 'bugCategories' property.
+    QVariantList bugQuestions() const; ///< Getter for the 'bugQuestions' property.
     void setDockIconVisible(bool visible); ///< Setter for the 'dockIconVisible' property.
     bool dockIconVisible() const;; ///< Getter for the 'dockIconVisible' property.
 
@@ -130,6 +152,7 @@ signals: // Signal used by the Qt property system. Many of them are unused but r
     void isAutomaticUpdateOnChanged(bool value); ///<Signal for the change of the 'isAutomaticUpdateOn' property.
     void isBetaEnabledChanged(bool value); ///<Signal for the change of the 'isBetaEnabled' property.
     void isAllMailVisibleChanged(bool value); ///<Signal for the change of the 'isAllMailVisible' property.
+    void isTelemetryDisabledChanged(bool isDisabled); ///<Signal for the change of the 'isTelemetryDisabled' property.
     void colorSchemeNameChanged(QString const &scheme); ///<Signal for the change of the 'colorSchemeName' property.
     void isDoHEnabledChanged(bool value); ///<Signal for the change of the 'isDoHEnabled' property.
     void logsPathChanged(QUrl const &path); ///<Signal for the change of the 'logsPath' property.
@@ -140,8 +163,11 @@ signals: // Signal used by the Qt property system. Many of them are unused but r
     void appnameChanged(QString const &appname); ///<Signal for the change of the 'appname' property.
     void vendorChanged(QString const &vendor); ///<Signal for the change of the 'vendor' property.
     void versionChanged(QString const &version); ///<Signal for the change of the 'version' property.
+    void tagChanged(QString const &tag); ///<Signal for the change of the 'tag' property.
     void currentEmailClientChanged(QString const &email); ///<Signal for the change of the 'currentEmailClient' property.
     void currentKeychainChanged(QString const &keychain); ///<Signal for the change of the 'currentKeychain' property.
+    void bugCategoriesChanged(QVariantList const &bugCategories); ///<Signal for the change of the 'bugCategories' property.
+    void bugQuestionsChanged(QVariantList const &bugQuestions); ///<Signal for the change of the 'bugQuestions' property.
     void availableKeychainChanged(QStringList const &keychains); ///<Signal for the change of the 'availableKeychain' property.
     void hostnameChanged(QString const &hostname); ///<Signal for the change of the 'hostname' property.
     void isAutostartOnChanged(bool value); ///<Signal for the change of the 'isAutostartOn' property.
@@ -152,6 +178,7 @@ public slots: // slot for signals received from QML -> To be forwarded to Bridge
     void toggleAutostart(bool active); ///< Slot for the autostart toggle.
     void toggleBeta(bool active); ///< Slot for the beta toggle.
     void changeIsAllMailVisible(bool isVisible); ///< Slot for the changing of 'All Mail' visibility.
+    void toggleIsTelemetryDisabled(bool isDisabled); ///< Slot for toggling telemetry on/off.
     void changeColorScheme(QString const &scheme); ///< Slot for the change of the theme.
     void setDiskCachePath(QUrl const &path) const; ///< Slot for the change of the disk cache path.
     void login(QString const &username, QString const &password) const; ///< Slot for the login button (initial login).
@@ -162,38 +189,50 @@ public slots: // slot for signals received from QML -> To be forwarded to Bridge
     void toggleAutomaticUpdate(bool makeItActive); ///< Slot for the automatic update toggle
     void updateCurrentMailClient(); ///< Slot for the change of the current mail client.
     void changeKeychain(QString const &keychain); ///< Slot for the change of keychain.
-    void guiReady() const; ///< Slot for the GUI ready signal.
+    void guiReady(); ///< Slot for the GUI ready signal.
     void quit() const; ///< Slot for the quit signal.
     void restart() const; ///< Slot for the restart signal.
     void forceLauncher(QString launcher) const; ///< Slot for the change of the launcher.
     void checkUpdates() const; ///< Slot for the update check.
     void installUpdate() const; ///< Slot for the update install.
     void triggerReset() const; ///< Slot for the triggering of reset.
-    void reportBug(QString const &description, QString const &address, QString const &emailClient, bool includeLogs) const; ///< Slot for the bug report.
+    void reportBug(QString const &category, QString const &description, QString const &address, QString const &emailClient, bool includeLogs) const; ///< Slot for the bug report.
+    void installTLSCertificate(); ///< Installs the Bridge TLS certificate in the Keychain.
     void exportTLSCertificates() const; ///< Slot for the export of the TLS certificates.
     void onResetFinished(); ///< Slot for the reset finish signal.
     void onVersionChanged(); ///< Slot for the version change signal.
     void setMailServerSettings(int imapPort, int smtpPort, bool useSSLForIMAP, bool useSSLForSMTP) const; ///< Forwards a connection mode change request from QML to gRPC
+    void sendBadEventUserFeedback(QString const &userID, bool doResync); ///< Slot the providing user feedback for a bad event.
+    void notifyReportBugClicked() const; ///< Slot for the ReportBugClicked gRPC event.
+    void notifyAutoconfigClicked(QString const &client) const; ///< Slot for gAutoconfigClicked gRPC event.
+    void notifyExternalLinkClicked(QString const &article) const; ///< Slot for KBArticleClicked gRPC event.
+
+public slots: // slots for functions that need to be processed locally.
+    void setNormalTrayIcon(); ///< Set the tray icon to normal.
+    void setErrorTrayIcon(QString const& stateString, QString const &statusIcon); ///< Set the tray icon to 'error' state.
+    void setWarnTrayIcon(QString const& stateString, QString const &statusIcon); ///< Set the tray icon to 'warn' state.
+    void setUpdateTrayIcon(QString const& stateString, QString const &statusIcon); ///< Set the tray icon to 'update' state.
 
 public slots: // slot for signals received from gRPC that need transformation instead of simple forwarding
+    void internetStatusChanged(bool isOn); ///< Check if bridge considers internet as on.
     void onMailServerSettingsChanged(int imapPort, int smtpPort, bool useSSLForIMAP, bool useSSLForSMTP); ///< Slot for the ConnectionModeChanged gRPC event.
     void onGenericError(bridgepp::ErrorInfo const &info); ///< Slot for generic errors received from the gRPC service.
     void onLoginFinished(QString const &userID, bool wasSignedOut); ///< Slot for LoginFinished gRPC event.
     void onLoginAlreadyLoggedIn(QString const &userID); ///< Slot for the LoginAlreadyLoggedIn gRPC event.
+    void onUserBadEvent(QString const& userID, QString const& errorMessage); ///< Slot for the userBadEvent gRPC event.
+    void onIMAPLoginFailed(QString const& username); ///< Slot the the imapLoginFailed event.
 
 signals: // Signals received from the Go backend, to be forwarded to QML
     void toggleAutostartFinished(); ///< Signal for the 'toggleAutostartFinished' gRPC stream event.
-    void diskCacheUnavailable(); ///< Signal for the 'diskCacheUnavailable' gRPC stream event.
     void cantMoveDiskCache(); ///< Signal for the 'cantMoveDiskCache' gRPC stream event.
     void diskCachePathChangeFinished(); ///< Signal for the 'diskCachePathChangeFinished' gRPC stream event.
-    void diskFull(); ///< Signal for the 'diskFull' gRPC stream event.
     void loginUsernamePasswordError(QString const &errorMsg); ///< Signal for the 'loginUsernamePasswordError' gRPC stream event.
     void loginFreeUserError(); ///< Signal for the 'loginFreeUserError' gRPC stream event.
     void loginConnectionError(QString const &errorMsg); ///< Signal for the 'loginConnectionError' gRPC stream event.
     void login2FARequested(QString const &username); ///< Signal for the 'login2FARequested' gRPC stream event.
     void login2FAError(QString const &errorMsg); ///< Signal for the 'login2FAError' gRPC stream event.
     void login2FAErrorAbort(QString const &errorMsg); ///< Signal for the 'login2FAErrorAbort' gRPC stream event.
-    void login2PasswordRequested(); ///< Signal for the 'login2PasswordRequested' gRPC stream event.
+    void login2PasswordRequested(QString const &username); ///< Signal for the 'login2PasswordRequested' gRPC stream event.
     void login2PasswordError(QString const &errorMsg); ///< Signal for the 'login2PasswordError' gRPC stream event.
     void login2PasswordErrorAbort(QString const &errorMsg); ///< Signal for the 'login2PasswordErrorAbort' gRPC stream event.
     void loginFinished(int index, bool wasSignedOut); ///< Signal for the 'loginFinished' gRPC stream event.
@@ -217,27 +256,36 @@ signals: // Signals received from the Go backend, to be forwarded to QML
     void changeKeychainFinished(); ///< Signal for the 'changeKeychainFinished' gRPC stream event.
     void notifyHasNoKeychain(); ///< Signal for the 'notifyHasNoKeychain' gRPC stream event.
     void notifyRebuildKeychain(); ///< Signal for the 'notifyRebuildKeychain' gRPC stream event.
-    void noActiveKeyForRecipient(QString const &email); ///< Signal for the 'noActiveKeyForRecipient' gRPC stream event.
     void addressChanged(QString const &address); ///< Signal for the 'addressChanged' gRPC stream event.
     void addressChangedLogout(QString const &address); ///< Signal for the 'addressChangedLogout' gRPC stream event.
     void apiCertIssue(); ///< Signal for the 'apiCertIssue' gRPC stream event.
     void userDisconnected(QString const &username); ///< Signal for the 'userDisconnected' gRPC stream event.
+    void userBadEvent(QString const &userID, QString const &description); ///< Signal for the 'userBadEvent' gRPC stream event.
     void internetOff(); ///< Signal for the 'internetOff' gRPC stream event.
     void internetOn(); ///< Signal for the 'internetOn' gRPC stream event.
     void resetFinished(); ///< Signal for the 'resetFinished' gRPC stream event.
     void reportBugFinished(); ///< Signal for the 'reportBugFinished' gRPC stream event.
     void bugReportSendSuccess(); ///< Signal for the 'bugReportSendSuccess' gRPC stream event.
+    void bugReportSendFallback(); ///< Signal for the 'bugReportSendFallback' gRPC stream event.
     void bugReportSendError(); ///< Signal for the 'bugReportSendError' gRPC stream event.
+    void certificateInstallSuccess(); ///< Signal for the 'certificateInstallSuccess' gRPC stream event.
+    void certificateInstallCanceled(); ///< Signal for the 'certificateInstallCanceled' gRPC stream event.
+    void certificateInstallFailed(); /// Signal for the 'certificateInstallFailed' gRPC stream event.
     void showMainWindow(); ///< Signal for the 'showMainWindow' gRPC stream event.
     void hideMainWindow(); ///< Signal for the 'hideMainWindow' gRPC stream event.
+    void showHelp(); ///< Signal for the 'showHelp' event (from the context menu).
+    void showSettings(); ///< Signal for the 'showSettings' event (from the context menu).
+    void selectUser(QString const& userID, bool forceShowWindow); ///< Signal emitted in order to selected a user with a given ID in the list.
     void genericError(QString const &title, QString const &description); ///< Signal for the 'genericError' gRPC stream event.
+    void imapLoginWhileSignedOut(QString const& username); ///< Signal for the notification of IMAP login attempt on a signed out account.
 
     // This signal is emitted when an exception is intercepted is calls triggered by QML. QML engine would intercept the exception otherwise.
-    void fatalError(QString const &function, QString const &message) const; ///< Signal emitted when an fatal error occurs.
+    void fatalError(bridgepp::Exception const& e) const; ///< Signal emitted when an fatal error occurs.
 
 private: // member functions
     void retrieveUserList(); ///< Retrieve the list of users via gRPC.
     void connectGrpcEvents(); ///< Connect gRPC that need to be forwarded to QML via backend signals
+    void displayBadEventDialog(QString const& userID); ///< Displays the bad event dialog for a user.
 
 private: // data members
     UserList *users_ { nullptr }; ///< The user list. Owned by backend.
@@ -250,7 +298,10 @@ private: // data members
     int smtpPort_ { 0 }; ///< The cached value for the SMTP port.
     bool useSSLForIMAP_ { false }; ///< The cached value for useSSLForIMAP.
     bool useSSLForSMTP_ { false }; ///< The cached value for useSSLForSMTP.
-
+    bool isInternetOn_ { true }; ///< Does bridge consider internet as on?
+    QList<QString> badEventDisplayQueue_; ///< THe queue for displaying 'bad event feedback request dialog'.
+    std::unique_ptr<TrayIcon> trayIcon_; ///< The tray icon for the application.
+    bridgepp::BugReportFlow reportFlow_;  ///< The bug report flow.
     friend class AppController;
 };
 

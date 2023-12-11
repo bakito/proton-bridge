@@ -48,8 +48,9 @@ typedef std::unique_ptr<grpc::ClientContext> UPClientContext;
 class GRPCClient : public QObject {
 Q_OBJECT
 public: // static member functions
-    static void removeServiceConfigFile(); ///< Delete the service config file.
-    static GRPCConfig waitAndRetrieveServiceConfig(qint64 timeoutMs, class ProcessMonitor *serverProcess); ///< Wait and retrieve the service configuration.
+    static void removeServiceConfigFile(QString const &configDir); ///< Delete the service config file.
+    static GRPCConfig waitAndRetrieveServiceConfig(QString const &sessionID, QString const &configDir, qint64 timeoutMs,
+        class ProcessMonitor *serverProcess); ///< Wait and retrieve the service configuration.
 
 public: // member functions.
     GRPCClient() = default; ///< Default constructor.
@@ -59,23 +60,24 @@ public: // member functions.
     GRPCClient &operator=(GRPCClient const &) = delete; ///< Disabled assignment operator.
     GRPCClient &operator=(GRPCClient &&) = delete; ///< Disabled move assignment operator.
     void setLog(Log *log); ///< Set the log for the client.
-    bool connectToServer(GRPCConfig const &config, class ProcessMonitor *serverProcess, QString &outError); ///< Establish connection to the gRPC server.
+    void connectToServer(QString const &sessionID, QString const &configDir, GRPCConfig const &config, class ProcessMonitor *serverProcess); ///< Establish connection to the gRPC server.
+    bool isConnected() const; ///< Check whether the gRPC client is connected to the server.
 
     grpc::Status checkTokens(QString const &clientConfigPath, QString &outReturnedClientToken); ///< Performs a token check.
     grpc::Status addLogEntry(Log::Level level, QString const &package, QString const &message); ///< Performs the "AddLogEntry" gRPC call.
-    grpc::Status guiReady(); ///< performs the "GuiReady" gRPC call.
-    grpc::Status isFirstGUIStart(bool &outIsFirst); ///< performs the "IsFirstGUIStart" gRPC call.
+    grpc::Status guiReady(bool &outShowSplashScreen); ///< performs the "GuiReady" gRPC call.
     grpc::Status isAutostartOn(bool &outIsOn); ///< Performs the "isAutostartOn" gRPC call.
     grpc::Status setIsAutostartOn(bool on); ///< Performs the "setIsAutostartOn" gRPC call.
     grpc::Status isBetaEnabled(bool &outEnabled); ///< Performs the "isBetaEnabled" gRPC call.
     grpc::Status setIsBetaEnabled(bool enabled); ///< Performs the 'setIsBetaEnabled' gRPC call.
     grpc::Status isAllMailVisible(bool &outIsVisible); ///< Performs the "isAllMailVisible" gRPC call.
     grpc::Status setIsAllMailVisible(bool isVisible); ///< Performs the 'setIsAllMailVisible' gRPC call.
+    grpc::Status isTelemetryDisabled(bool &outIsDisabled); ///< Performs the 'setIsTelemetryDisabled' gRPC call.
+    grpc::Status setIsTelemetryDisabled(bool isDisabled); ///< Performs the 'isTelemetryDisabled' gRPC call.
     grpc::Status colorSchemeName(QString &outName); ///< Performs the "colorSchemeName' gRPC call.
     grpc::Status setColorSchemeName(QString const &name); ///< Performs the "setColorSchemeName' gRPC call.
     grpc::Status currentEmailClient(QString &outName); ///< Performs the 'currentEmailClient' gRPC call.
-    grpc::Status reportBug(QString const &description, QString const &address, QString const &emailClient, bool includeLogs); ///< Performs the 'ReportBug' gRPC call.
-    grpc::Status exportTLSCertificates(QString const &folderPath); ///< Performs the 'ExportTLSCertificates' gRPC call.
+    grpc::Status reportBug(QString const &category, QString const &description, QString const &address, QString const &emailClient, bool includeLogs); ///< Performs the 'ReportBug' gRPC call.
     grpc::Status quit(); ///< Perform the "Quit" gRPC call.
     grpc::Status restart(); ///< Performs the Restart gRPC call.
     grpc::Status triggerReset(); ///< Performs the triggerReset gRPC call.
@@ -83,7 +85,6 @@ public: // member functions.
     grpc::Status setMainExecutable(QString const &exe); ///< Performs the 'SetMainExecutable' call.
     grpc::Status isPortFree(qint32 port, bool &outFree); ///< Performs the 'IsPortFree' call.
     grpc::Status showOnStartup(bool &outValue); ///< Performs the 'ShowOnStartup' call.
-    grpc::Status showSplashScreen(bool &outValue); ///< Performs the 'ShowSplashScreen' call.
     grpc::Status goos(QString &outGoos); ///< Performs the 'GoOs' call.
     grpc::Status logsPath(QUrl &outPath); ///< Performs the 'LogsPath' call.
     grpc::Status licensePath(QUrl &outPath); ///< Performs the 'LicensePath' call.
@@ -100,6 +101,10 @@ signals: // app related signals
     void reportBugFinished();
     void reportBugSuccess();
     void reportBugError();
+    void reportBugFallback();
+    void certificateInstallSuccess();
+    void certificateInstallCanceled();
+    void certificateInstallFailed();
     void showMainWindow();
 
     // cache related calls
@@ -108,9 +113,7 @@ public:
     grpc::Status setDiskCachePath(QUrl const &path); ///< Performs the 'setDiskCachePath' call
 
 signals:
-    void diskCacheUnavailable();
     void cantMoveDiskCache();
-    void diskFull();
     void diskCachePathChanged(QUrl const &path);
     void diskCachePathChangeFinished();
 
@@ -141,10 +144,10 @@ signals:
     void loginUsernamePasswordError(QString const &errMsg);
     void loginFreeUserError();
     void loginConnectionError(QString const &errMsg);
-    void login2FARequested(QString const &userName);
+    void login2FARequested(QString const &username);
     void login2FAError(QString const &errMsg);
     void login2FAErrorAbort(QString const &errMsg);
-    void login2PasswordRequested();
+    void login2PasswordRequested(QString const &username);
     void login2PasswordError(QString const &errMsg);
     void login2PasswordErrorAbort(QString const &errMsg);
     void loginFinished(QString const &userID, bool wasSignedOut);
@@ -175,16 +178,33 @@ public: // user related calls
     grpc::Status removeUser(QString const &userID); ///< Performs the 'removeUser' call.
     grpc::Status configureAppleMail(QString const &userID, QString const &address); ///< Performs the 'configureAppleMail' call.
     grpc::Status setUserSplitMode(QString const &userID, bool active); ///< Performs the 'SetUserSplitMode' call.
+    grpc::Status sendBadEventUserFeedback(QString const& userID, bool doResync); ///< Performs the 'SendBadEventUserFeedback' call.
 
 signals:
     void toggleSplitModeFinished(QString const &userID);
     void userDisconnected(QString const &username);
     void userChanged(QString const &userID);
+    void userBadEvent(QString const &userID, QString const& errorMessage);
+    void usedBytesChanged(QString const &userID, qint64 usedBytes);
+    void imapLoginFailed(QString const& username);
+    void syncStarted(QString const &userID);
+    void syncFinished(QString const &userID);
+    void syncProgress(QString const &userID, double progress, qint64 elapsedMs, qint64 remainingMs);
+
+public: // telemetry related calls
+    grpc::Status reportBugClicked();  ///< Performs the 'reportBugClicked' call.
+    grpc::Status autoconfigClicked(QString const &userID); ///< Performs the 'AutoconfigClicked' call.
+    grpc::Status externalLinkClicked(QString const &userID); ///< Performs the 'KBArticleClicked' call.
 
 public: // keychain related calls
     grpc::Status availableKeychains(QStringList &outKeychains);
     grpc::Status currentKeychain(QString &outKeychain);
     grpc::Status setCurrentKeychain(QString const &keychain);
+
+public: // cert related calls
+    grpc::Status isTLSCertificateInstalled(bool &outIsInstalled); ///< Perform the 'IsTLSCertificateInstalled' gRPC call.
+    grpc::Status installTLSCertificate(); ///< Perform the 'InstallTLSCertificate' gRPC call.
+    grpc::Status exportTLSCertificates(QString const &folderPath); ///< Performs the 'ExportTLSCertificates' gRPC call.
 
 signals:
     void changeKeychainFinished();
@@ -193,7 +213,6 @@ signals:
     void certIsReady();
 
 signals: // mail related events
-    void noActiveKeyForRecipient(QString const &email);
     void addressChanged(QString const &address);
     void addressChangedLogout(QString const &address);
     void apiCertIssue();

@@ -17,10 +17,18 @@
 
 package certs
 
+func osSupportCertInstall() bool {
+	return false
+}
+
 func installCert([]byte) error {
 	return nil // NOTE(GODT-986): Install certs to root cert store?
 }
 
 func uninstallCert([]byte) error {
 	return nil // NOTE(GODT-986): Uninstall certs from root cert store?
+}
+
+func isCertInstalled([]byte) bool {
+	return false
 }

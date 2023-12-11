@@ -23,11 +23,19 @@ namespace bridgepp {
 
 
 //****************************************************************************************************************************************************
-/// \param[in] what A description of the exception
+/// \param[in] what A description of the exception.
+/// \param[in] details The optional details for the exception.
+/// \param[in] function The name of the calling function.
+/// \param[in] showSupportLink Should a link to the support web form be included in GUI message.
 //****************************************************************************************************************************************************
-Exception::Exception(QString what) noexcept
+Exception::Exception(QString qwhat, QString details, QString function, QByteArray attachment, bool showSupportLink) noexcept
     : std::exception()
-    , what_(std::move(what)) {
+    , qwhat_(std::move(qwhat))
+    , what_(qwhat_.toLocal8Bit())
+    , details_(std::move(details))
+    , function_(std::move(function))
+    , attachment_(std::move(attachment))
+    , showSupportLink_(showSupportLink) {
 }
 
 
@@ -36,7 +44,12 @@ Exception::Exception(QString what) noexcept
 //****************************************************************************************************************************************************
 Exception::Exception(Exception const &ref) noexcept
     : std::exception(ref)
-    , what_(ref.what_) {
+    , qwhat_(ref.qwhat_)
+    , what_(ref.what_)
+    , details_(ref.details_)
+    , function_(ref.function_)
+    , attachment_(ref.attachment_)
+    , showSupportLink_(ref.showSupportLink_) {
 }
 
 
@@ -45,15 +58,20 @@ Exception::Exception(Exception const &ref) noexcept
 //****************************************************************************************************************************************************
 Exception::Exception(Exception &&ref) noexcept
     : std::exception(ref)
-    , what_(ref.what_) {
+    , qwhat_(ref.qwhat_)
+    , what_(ref.what_)
+    , details_(ref.details_)
+    , function_(ref.function_)
+    , attachment_(ref.attachment_)
+    , showSupportLink_(ref.showSupportLink_) {
 }
 
 
 //****************************************************************************************************************************************************
 /// \return a string describing the exception
 //****************************************************************************************************************************************************
-QString const &Exception::qwhat() const noexcept {
-    return what_;
+QString Exception::qwhat() const noexcept {
+    return qwhat_;
 }
 
 
@@ -61,7 +79,54 @@ QString const &Exception::qwhat() const noexcept {
 /// \return A pointer to the description string of the exception.
 //****************************************************************************************************************************************************
 const char *Exception::what() const noexcept {
-    return what_.toLocal8Bit().constData();
+    return what_.constData();
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The details for the exception.
+//****************************************************************************************************************************************************
+QString Exception::details() const noexcept {
+    return details_;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The function that threw the exception.
+//****************************************************************************************************************************************************
+QString Exception::function() const noexcept {
+    return function_;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The attachment for the exception.
+//****************************************************************************************************************************************************
+QByteArray Exception::attachment() const noexcept {
+    return attachment_;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The details exception.
+//****************************************************************************************************************************************************
+QString Exception::detailedWhat() const {
+    QString result = qwhat_;
+    if (!function_.isEmpty()) {
+        result = QString("%1(): %2").arg(function_, result);
+    }
+    if (!details_.isEmpty()) {
+        result += "\n\nDetails:\n" + details_;
+    }
+    return result;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return true iff A link to the support page should shown in the GUI message box.
+//****************************************************************************************************************************************************
+bool Exception::showSupportLink() const {
+    return showSupportLink_;
 }
 
 

@@ -29,14 +29,17 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ProtonMail/gluon/queue"
+	"github.com/ProtonMail/gluon/async"
+	"github.com/ProtonMail/gluon/imap"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/cookies"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	frontend "github.com/ProtonMail/proton-bridge/v3/internal/frontend/grpc"
+	"github.com/ProtonMail/proton-bridge/v3/internal/service"
 	"github.com/ProtonMail/proton-bridge/v3/internal/useragent"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -100,18 +103,19 @@ func (t *testCtx) initBridge() (<-chan events.Event, error) {
 	}
 
 	// Get the default gluon path.
-	gluonDir, err := t.locator.ProvideGluonPath()
+	gluonCacheDir, err := t.locator.ProvideGluonDataPath()
 	if err != nil {
 		return nil, fmt.Errorf("could not get gluon dir: %w", err)
 	}
 
 	// Create the vault.
-	vault, corrupt, err := vault.New(vaultDir, gluonDir, t.storeKey)
+	vault, corrupt, err := vault.New(vaultDir, gluonCacheDir, t.storeKey, async.NoopPanicHandler{})
 	if err != nil {
 		return nil, fmt.Errorf("could not create vault: %w", err)
-	} else if corrupt {
-		return nil, fmt.Errorf("vault is corrupt")
+	} else if corrupt != nil {
+		return nil, fmt.Errorf("vault is corrupt: %w", corrupt)
 	}
+	t.vault = vault
 
 	// Create the underlying cookie jar.
 	jar, err := cookiejar.New(nil)
@@ -150,6 +154,7 @@ func (t *testCtx) initBridge() (<-chan events.Event, error) {
 		t.mocks.Autostarter,
 		t.mocks.Updater,
 		t.version,
+		keychain.NewTestKeychainsList(),
 
 		// API stuff
 		t.api.GetHostURL(),
@@ -160,6 +165,8 @@ func (t *testCtx) initBridge() (<-chan events.Event, error) {
 		t.mocks.ProxyCtl,
 		t.mocks.CrashHandler,
 		t.reporter,
+		imap.DefaultEpochUIDValidityGenerator(),
+		t.heartbeat,
 
 		// Logging stuff
 		logIMAP,
@@ -171,6 +178,7 @@ func (t *testCtx) initBridge() (<-chan events.Event, error) {
 	}
 
 	t.bridge = bridge
+	t.heartbeat.setBridge(bridge)
 
 	return t.events.collectFrom(eventCh), nil
 }
@@ -197,7 +205,7 @@ func (t *testCtx) initFrontendService(eventCh <-chan events.Event) error {
 	t.mocks.Autostarter.EXPECT().IsEnabled().AnyTimes()
 
 	service, err := frontend.NewService(
-		new(mockCrashHandler),
+		&async.NoopPanicHandler{},
 		new(mockRestarter),
 		t.locator,
 		t.bridge,
@@ -260,7 +268,7 @@ func (t *testCtx) initFrontendClient() error {
 		return fmt.Errorf("could not read grpcServerConfig.json: %w", err)
 	}
 
-	var cfg frontend.Config
+	var cfg service.Config
 
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return fmt.Errorf("could not unmarshal grpcServerConfig.json: %w", err)
@@ -298,7 +306,7 @@ func (t *testCtx) initFrontendClient() error {
 		return fmt.Errorf("could not start event stream: %w", err)
 	}
 
-	eventCh := queue.NewQueuedChannel[*frontend.StreamEvent](0, 0)
+	eventCh := async.NewQueuedChannel[*frontend.StreamEvent](0, 0, async.NoopPanicHandler{}, "test-frontend-client")
 
 	go func() {
 		defer eventCh.CloseAndDiscardQueued()
@@ -339,15 +347,14 @@ func (t *testCtx) closeFrontendClient() error {
 
 	return nil
 }
-
-type mockCrashHandler struct{}
-
-func (m *mockCrashHandler) HandlePanic() {}
+func (t *testCtx) expectProxyCtlAllowProxy() {
+	t.mocks.ProxyCtl.EXPECT().AllowProxy()
+}
 
 type mockRestarter struct{}
 
-func (m *mockRestarter) Set(restart, crash bool) {}
+func (m *mockRestarter) Set(_, _ bool) {}
 
-func (m *mockRestarter) AddFlags(flags ...string) {}
+func (m *mockRestarter) AddFlags(_ ...string) {}
 
-func (m *mockRestarter) Override(exe string) {}
+func (m *mockRestarter) Override(_ string) {}

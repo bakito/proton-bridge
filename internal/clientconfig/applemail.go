@@ -39,10 +39,10 @@ func (c *AppleMail) Configure(
 	hostname string,
 	imapPort, smtpPort int,
 	imapSSL, smtpSSL bool,
-	username, addresses string,
+	username, displayName, addresses string,
 	password []byte,
 ) error {
-	mc := prepareMobileConfig(hostname, imapPort, smtpPort, imapSSL, smtpSSL, username, addresses, password)
+	mc := prepareMobileConfig(hostname, imapPort, smtpPort, imapSSL, smtpSSL, username, displayName, addresses, password)
 
 	confPath, err := saveConfigTemporarily(mc)
 	if err != nil {
@@ -66,13 +66,15 @@ func prepareMobileConfig(
 	hostname string,
 	imapPort, smtpPort int,
 	imapSSL, smtpSSL bool,
-	username, addresses string,
+	username, displayName, addresses string,
 	password []byte,
 ) *mobileconfig.Config {
 	return &mobileconfig.Config{
-		DisplayName:  username,
-		EmailAddress: addresses,
-		Identifier:   "protonmail " + username + strconv.FormatInt(time.Now().Unix(), 10),
+		DisplayName:        username,
+		EmailAddress:       addresses,
+		AccountName:        displayName,
+		AccountDescription: username,
+		Identifier:         "protonmail " + username + strconv.FormatInt(time.Now().Unix(), 10),
 		IMAP: &mobileconfig.IMAP{
 			Hostname: hostname,
 			Port:     imapPort,
@@ -98,6 +100,8 @@ func saveConfigTemporarily(mc *mobileconfig.Config) (fname string, err error) {
 
 	// Make sure the temporary file is deleted.
 	go func() {
+		defer recover() //nolint:errcheck
+
 		<-time.After(10 * time.Minute)
 		_ = os.RemoveAll(dir)
 	}()

@@ -32,18 +32,18 @@ service Bridge {
   // App related calls
   rpc CheckTokens(google.protobuf.StringValue) returns (google.protobuf.StringValue);
   rpc AddLogEntry(AddLogEntryRequest) returns (google.protobuf.Empty);
-  rpc GuiReady (google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc GuiReady (google.protobuf.Empty) returns (GuiReadyResponse);
   rpc Quit (google.protobuf.Empty) returns (google.protobuf.Empty);
   rpc Restart (google.protobuf.Empty) returns (google.protobuf.Empty);
   rpc ShowOnStartup(google.protobuf.Empty) returns (google.protobuf.BoolValue);
-  rpc ShowSplashScreen(google.protobuf.Empty) returns (google.protobuf.BoolValue);
-  rpc IsFirstGuiStart(google.protobuf.Empty) returns (google.protobuf.BoolValue);
   rpc SetIsAutostartOn(google.protobuf.BoolValue) returns (google.protobuf.Empty);
   rpc IsAutostartOn(google.protobuf.Empty) returns (google.protobuf.BoolValue);
   rpc SetIsBetaEnabled(google.protobuf.BoolValue) returns (google.protobuf.Empty);
   rpc IsBetaEnabled(google.protobuf.Empty) returns (google.protobuf.BoolValue);
   rpc SetIsAllMailVisible(google.protobuf.BoolValue) returns (google.protobuf.Empty);
   rpc IsAllMailVisible(google.protobuf.Empty) returns (google.protobuf.BoolValue);
+  rpc SetIsTelemetryDisabled(google.protobuf.BoolValue) returns (google.protobuf.Empty);
+  rpc IsTelemetryDisabled(google.protobuf.Empty) returns (google.protobuf.BoolValue);
   rpc GoOs(google.protobuf.Empty) returns (google.protobuf.StringValue);
   rpc TriggerReset(google.protobuf.Empty) returns (google.protobuf.Empty);
   rpc Version(google.protobuf.Empty) returns (google.protobuf.StringValue);
@@ -56,7 +56,6 @@ service Bridge {
   rpc ColorSchemeName(google.protobuf.Empty) returns (google.protobuf.StringValue); // TODO Color scheme should probably entirely be managed by the client.
   rpc CurrentEmailClient(google.protobuf.Empty) returns (google.protobuf.StringValue);
   rpc ReportBug(ReportBugRequest) returns (google.protobuf.Empty);
-  rpc ExportTLSCertificates(google.protobuf.StringValue) returns (google.protobuf.Empty);
   rpc ForceLauncher(google.protobuf.StringValue) returns (google.protobuf.Empty);
   rpc SetMainExecutable(google.protobuf.StringValue) returns (google.protobuf.Empty);
 
@@ -93,9 +92,20 @@ service Bridge {
   rpc GetUserList(google.protobuf.Empty) returns (UserListResponse);
   rpc GetUser(google.protobuf.StringValue) returns (User);
   rpc SetUserSplitMode(UserSplitModeRequest) returns (google.protobuf.Empty);
+  rpc SendBadEventUserFeedback(UserBadEventFeedbackRequest) returns (google.protobuf.Empty);
   rpc LogoutUser(google.protobuf.StringValue) returns (google.protobuf.Empty);
   rpc RemoveUser(google.protobuf.StringValue) returns (google.protobuf.Empty);
   rpc ConfigureUserAppleMail(ConfigureAppleMailRequest) returns (google.protobuf.Empty);
+
+  // Telemetry
+  rpc ReportBugClicked(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc AutoconfigClicked(google.protobuf.StringValue) returns (google.protobuf.Empty);
+  rpc ExternalLinkClicked(google.protobuf.StringValue) returns (google.protobuf.Empty);
+
+  // TLS certificate related calls
+  rpc IsTLSCertificateInstalled(google.protobuf.Empty) returns (google.protobuf.BoolValue);
+  rpc InstallTLSCertificate(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc ExportTLSCertificates(google.protobuf.StringValue) returns (google.protobuf.Empty);
 
   // Server -> Client event stream
   rpc RunEventStream(EventStreamRequest) returns (stream StreamEvent); // Keep streaming until StopEventStream is called.
@@ -126,16 +136,26 @@ message AddLogEntryRequest {
   string message = 3;
 };
 
+
+//**********************************************************
+//  GuiReady
+//**********************************************************
+message GuiReadyResponse {
+  bool showSplashScreen = 1;
+}
+
+
 //**********************************************************
 //  Bug reporting related messages.
 //**********************************************************
 message ReportBugRequest {
   string osType = 1;
   string osVersion = 2;
-  string description = 3;
-  string address = 4;
-  string emailClient = 5;
-  bool includeLogs = 6;
+  string title = 3;
+  string description = 4;
+  string address = 5;
+  string emailClient = 6;
+  bool includeLogs = 7;
 
 }
 
@@ -196,6 +216,12 @@ message UserSplitModeRequest {
   bool active = 2;
 }
 
+message UserBadEventFeedbackRequest {
+  string userID = 1;
+  bool doResync = 2;
+}
+
+
 message UserListResponse {
   repeated User users = 1;
 }
@@ -239,6 +265,10 @@ message AppEvent {
     ReportBugSuccessEvent reportBugSuccess = 5;
     ReportBugErrorEvent reportBugError = 6;
     ShowMainWindowEvent showMainWindow = 7;
+    ReportBugFallbackEvent reportBugFallback = 8;
+    CertificateInstallSuccessEvent certificateInstallSuccess = 9;
+    CertificateInstallCanceledEvent certificateInstallCanceled = 10;
+    CertificateInstallFailedEvent certificateInstallFailed = 11;
   }
 }
 
@@ -252,6 +282,10 @@ message ReportBugFinishedEvent {}
 message ReportBugSuccessEvent {}
 message ReportBugErrorEvent {}
 message ShowMainWindowEvent {}
+message ReportBugFallbackEvent {}
+message CertificateInstallSuccessEvent {}
+message CertificateInstallCanceledEvent {}
+message CertificateInstallFailedEvent {}
 
 //**********************************************************
 // Login related events
@@ -285,7 +319,9 @@ message LoginTfaRequestedEvent {
   string username = 1;
 }
 
-message LoginTwoPasswordsRequestedEvent {}
+message LoginTwoPasswordsRequestedEvent {
+  string username = 1;
+}
 
 message LoginFinishedEvent {
   string userID = 1;
@@ -349,9 +385,7 @@ message DiskCacheEvent {
 }
 
 enum DiskCacheErrorType {
-  DISK_CACHE_UNAVAILABLE_ERROR = 0;
-  CANT_MOVE_DISK_CACHE_ERROR = 1;
-  DISK_FULL_ERROR = 2;
+  CANT_MOVE_DISK_CACHE_ERROR = 0;
 };
 
 message DiskCacheErrorEvent {
@@ -410,15 +444,10 @@ message RebuildKeychainEvent {}
 //**********************************************************
 message MailEvent {
   oneof event {
-    NoActiveKeyForRecipientEvent noActiveKeyForRecipientEvent = 1;
-    AddressChangedEvent addressChanged = 2;
-    AddressChangedLogoutEvent addressChangedLogout = 3;
-    ApiCertIssueEvent apiCertIssue = 6;
+    AddressChangedEvent addressChanged = 1;
+    AddressChangedLogoutEvent addressChangedLogout = 2;
+    ApiCertIssueEvent apiCertIssue = 3;
   }
-}
-
-message NoActiveKeyForRecipientEvent {
-  string email = 1;
 }
 
 message AddressChangedEvent {
@@ -440,6 +469,12 @@ message UserEvent {
     ToggleSplitModeFinishedEvent toggleSplitModeFinished= 1;
     UserDisconnectedEvent userDisconnected = 2;
     UserChangedEvent userChanged = 3;
+    UserBadEvent userBadEvent = 4;
+    UsedBytesChangedEvent  usedBytesChangedEvent = 5;
+    ImapLoginFailedEvent imapLoginFailedEvent = 6;
+    SyncStartedEvent syncStartedEvent = 7;
+    SyncFinishedEvent syncFinishedEvent = 8;
+    SyncProgressEvent syncProgressEvent = 9;
   }
 }
 
@@ -453,6 +488,35 @@ message UserDisconnectedEvent {
 
 message UserChangedEvent {
   string userID = 1;
+}
+
+message UserBadEvent {
+  string userID = 1;
+  string errorMessage = 2;
+}
+
+message UsedBytesChangedEvent {
+  string userID = 1;
+  int64 usedBytes = 2;
+}
+
+message ImapLoginFailedEvent {
+  string username = 1;
+}
+
+message SyncStartedEvent {
+  string userID = 1;
+}
+
+message SyncFinishedEvent {
+  string userID = 1;
+}
+
+message SyncProgressEvent {
+  string userID = 1;
+  double progress = 2;
+  int64 elapsedMs = 3;
+  int64 remainingMs = 4;
 }
 
 //**********************************************************

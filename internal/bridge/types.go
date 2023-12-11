@@ -26,17 +26,13 @@ import (
 type Locator interface {
 	ProvideSettingsPath() (string, error)
 	ProvideLogsPath() (string, error)
-	ProvideGluonPath() (string, error)
+	ProvideGluonCachePath() (string, error)
+	ProvideGluonDataPath() (string, error)
+	ProvideStatsPath() (string, error)
 	GetLicenseFilePath() string
 	GetDependencyLicensesLink() string
-	Clear() error
-}
-
-type Identifier interface {
-	GetUserAgent() string
-	HasClient() bool
-	SetClient(name, version string)
-	SetPlatform(platform string)
+	Clear(...string) error
+	ProvideIMAPSyncConfigPath() (string, error)
 }
 
 type ProxyController interface {
@@ -57,4 +53,5 @@ type Autostarter interface {
 type Updater interface {
 	GetVersionInfo(context.Context, updater.Downloader, updater.Channel) (updater.VersionInfo, error)
 	InstallUpdate(context.Context, updater.Downloader, updater.VersionInfo) error
+	RemoveOldUpdates() error
 }

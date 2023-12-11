@@ -19,22 +19,27 @@ package user
 
 import (
 	"context"
-	"crypto/subtle"
+	"encoding/json"
 	"fmt"
-	"io"
-	"strings"
-	"sync/atomic"
+	"path/filepath"
 	"time"
 
-	"github.com/ProtonMail/gluon/connector"
-	"github.com/ProtonMail/gluon/imap"
-	"github.com/ProtonMail/gluon/queue"
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/go-proton-api"
-	"github.com/ProtonMail/proton-bridge/v3/internal/async"
+	"github.com/ProtonMail/proton-bridge/v3/internal/configstatus"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
-	"github.com/ProtonMail/proton-bridge/v3/internal/logging"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/imapservice"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/orderedtasks"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/sendrecorder"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/smtp"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice"
+	telemetryservice "github.com/ProtonMail/proton-bridge/v3/internal/services/telemetry"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/userevents"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/useridentity"
+	"github.com/ProtonMail/proton-bridge/v3/internal/telemetry"
+	"github.com/ProtonMail/proton-bridge/v3/internal/usertypes"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/algo"
 	"github.com/bradenaw/juniper/xslices"
@@ -54,40 +59,36 @@ const (
 )
 
 type User struct {
+	id  string
 	log *logrus.Entry
 
 	vault    *vault.User
 	client   *proton.Client
 	reporter reporter.Reporter
-	eventCh  *queue.QueuedChannel[events.Event]
-	sendHash *sendRecorder
+	sendHash *sendrecorder.SendRecorder
 
-	apiUser     proton.User
-	apiUserLock safe.RWMutex
+	eventCh   *async.QueuedChannel[events.Event]
+	eventLock safe.RWMutex
 
-	apiAddrs     map[string]proton.Address
-	apiAddrsLock safe.RWMutex
+	tasks *async.Group
 
-	apiLabels     map[string]proton.Label
-	apiLabelsLock safe.RWMutex
+	maxSyncMemory uint64
 
-	updateCh     map[string]*queue.QueuedChannel[imap.Update]
-	updateChLock safe.RWMutex
+	panicHandler     async.PanicHandler
+	configStatus     *configstatus.ConfigurationStatus
+	telemetryManager telemetry.Availability
+	// goStatusProgress triggers a check/sending if progress is needed.
+	goStatusProgress func()
 
-	tasks     *async.Group
-	abortable async.Abortable
-	goSync    func()
+	eventService     *userevents.Service
+	identityService  *useridentity.Service
+	smtpService      *smtp.Service
+	imapService      *imapservice.Service
+	telemetryService *telemetryservice.Service
 
-	pollAPIEventsCh chan chan struct{}
-	goPollAPIEvents func(wait bool)
-
-	syncWorkers int
-	showAllMail uint32
+	serviceGroup *orderedtasks.OrderedCancelGroup
 }
 
-// New returns a new user.
-//
-// nolint:funlen
 func New(
 	ctx context.Context,
 	encVault *vault.User,
@@ -95,10 +96,72 @@ func New(
 	reporter reporter.Reporter,
 	apiUser proton.User,
 	crashHandler async.PanicHandler,
-	syncWorkers int,
 	showAllMail bool,
-) (*User, error) { //nolint:funlen
+	maxSyncMemory uint64,
+	statsDir string,
+	telemetryManager telemetry.Availability,
+	imapServerManager imapservice.IMAPServerManager,
+	smtpServerManager smtp.ServerManager,
+	eventSubscription events.Subscription,
+	syncService syncservice.Regulator,
+	syncConfigDir string,
+	isNew bool,
+) (*User, error) {
+	user, err := newImpl(
+		ctx,
+		encVault,
+		client,
+		reporter,
+		apiUser,
+		crashHandler,
+		showAllMail,
+		maxSyncMemory,
+		statsDir,
+		telemetryManager,
+		imapServerManager,
+		smtpServerManager,
+		eventSubscription,
+		syncService,
+		syncConfigDir,
+		isNew,
+	)
+	if err != nil {
+		// Cleanup any pending resources on error
+		if user != nil {
+			user.Close()
+		}
+
+		return nil, err
+	}
+
+	return user, nil
+}
+
+// New returns a new user.
+func newImpl(
+	ctx context.Context,
+	encVault *vault.User,
+	client *proton.Client,
+	reporter reporter.Reporter,
+	apiUser proton.User,
+	crashHandler async.PanicHandler,
+	showAllMail bool,
+	maxSyncMemory uint64,
+	statsDir string,
+	telemetryManager telemetry.Availability,
+	imapServerManager imapservice.IMAPServerManager,
+	smtpServerManager smtp.ServerManager,
+	eventSubscription events.Subscription,
+	syncService syncservice.Regulator,
+	syncConfigDir string,
+	isNew bool,
+) (*User, error) {
 	logrus.WithField("userID", apiUser.ID).Info("Creating new user")
+
+	// Migrate Sync Status from Vault.
+	if err := migrateSyncStatusFromVault(encVault, syncConfigDir, apiUser.ID); err != nil {
+		return nil, err
+	}
 
 	// Get the user's API addresses.
 	apiAddrs, err := client.GetAddresses(ctx)
@@ -112,37 +175,106 @@ func New(
 		return nil, fmt.Errorf("failed to get labels: %w", err)
 	}
 
+	identityState := useridentity.NewState(apiUser, apiAddrs, client)
+
+	logrus.WithFields(logrus.Fields{
+		"userID":    apiUser.ID,
+		"numAddr":   len(apiAddrs),
+		"numLabels": len(apiLabels),
+	}).Info("Creating user object")
+
+	configStatusFile := filepath.Join(statsDir, apiUser.ID+".json")
+	configStatus, err := configstatus.LoadConfigurationStatus(configStatusFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init configuration status file: %w", err)
+	}
+
+	sendRecorder := sendrecorder.NewSendRecorder(sendrecorder.SendEntryExpiry)
+
 	// Create the user object.
 	user := &User{
 		log: logrus.WithField("userID", apiUser.ID),
+		id:  apiUser.ID,
 
 		vault:    encVault,
 		client:   client,
 		reporter: reporter,
-		eventCh:  queue.NewQueuedChannel[events.Event](0, 0),
-		sendHash: newSendRecorder(sendEntryExpiry),
+		sendHash: sendRecorder,
 
-		apiUser:     apiUser,
-		apiUserLock: safe.NewRWMutex(),
+		eventCh:   async.NewQueuedChannel[events.Event](0, 0, crashHandler, fmt.Sprintf("bridge-user-%v", apiUser.ID)),
+		eventLock: safe.NewRWMutex(),
 
-		apiAddrs:     groupBy(apiAddrs, func(addr proton.Address) string { return addr.ID }),
-		apiAddrsLock: safe.NewRWMutex(),
+		tasks: async.NewGroup(context.Background(), crashHandler),
 
-		apiLabels:     groupBy(apiLabels, func(label proton.Label) string { return label.ID }),
-		apiLabelsLock: safe.NewRWMutex(),
+		maxSyncMemory: maxSyncMemory,
 
-		updateCh:     make(map[string]*queue.QueuedChannel[imap.Update]),
-		updateChLock: safe.NewRWMutex(),
+		panicHandler: crashHandler,
 
-		tasks:           async.NewGroup(context.Background(), crashHandler),
-		pollAPIEventsCh: make(chan chan struct{}),
+		configStatus:     configStatus,
+		telemetryManager: telemetryManager,
 
-		syncWorkers: syncWorkers,
-		showAllMail: b32(showAllMail),
+		serviceGroup: orderedtasks.NewOrderedCancelGroup(crashHandler),
+		smtpService:  nil,
 	}
 
-	// Initialize the user's update channels for its current address mode.
-	user.initUpdateCh(encVault.AddressMode())
+	user.eventService = userevents.NewService(
+		apiUser.ID,
+		client,
+		userevents.NewVaultEventIDStore(encVault),
+		user,
+		EventPeriod,
+		EventJitter,
+		5*time.Minute,
+		crashHandler,
+		eventSubscription,
+	)
+
+	addressMode := usertypes.VaultToAddressMode(encVault.AddressMode())
+
+	user.identityService = useridentity.NewService(user.eventService, user, identityState, encVault, user)
+
+	user.telemetryService = telemetryservice.NewService(apiUser.ID, client, user.eventService)
+
+	user.smtpService = smtp.NewService(
+		apiUser.ID,
+		client,
+		sendRecorder,
+		crashHandler,
+		reporter,
+		encVault,
+		encVault,
+		user,
+		user.eventService,
+		addressMode,
+		identityState.Clone(),
+		smtpServerManager,
+	)
+
+	user.imapService = imapservice.NewService(
+		client,
+		identityState.Clone(),
+		user,
+		user.eventService,
+		imapServerManager,
+		user,
+		encVault,
+		encVault,
+		crashHandler,
+		sendRecorder,
+		user,
+		reporter,
+		addressMode,
+		eventSubscription,
+		syncConfigDir,
+		user.maxSyncMemory,
+		showAllMail,
+	)
+
+	// Check for status_progress when triggered.
+	user.goStatusProgress = user.tasks.PeriodicOrTrigger(configstatus.ProgressCheckInterval, 0, func(ctx context.Context) {
+		user.SendConfigStatusProgress(ctx)
+	})
+	defer user.goStatusProgress()
 
 	// When we receive an auth object, we update it in the vault.
 	// This will be used to authorize the user on the next run.
@@ -166,118 +298,113 @@ func New(
 		return nil
 	})
 
-	// Stream events from the API, logging any errors that occur.
-	// This does nothing until the sync has been marked as complete.
-	// When we receive an API event, we attempt to handle it.
-	// If successful, we update the event ID in the vault.
-	user.tasks.Once(func(ctx context.Context) {
-		ticker := proton.NewTicker(EventPeriod, EventJitter)
-		defer ticker.Stop()
-
-		for {
-			var doneCh chan struct{}
-
-			select {
-			case <-ctx.Done():
-				return
-
-			case doneCh = <-user.pollAPIEventsCh:
-				// ...
-
-			case <-ticker.C:
-				// ...
-			}
-
-			user.log.Debug("Event poll triggered")
-
-			if !user.vault.SyncStatus().IsComplete() {
-				user.log.Debug("Sync is incomplete, skipping event poll")
-			} else if err := user.doEventPoll(ctx); err != nil {
-				user.log.WithError(err).Error("Failed to poll events")
-			}
-
-			if doneCh != nil {
-				close(doneCh)
-			}
-		}
-	})
-
-	// When triggered, poll the API for events, optionally blocking until the poll is complete.
-	user.goPollAPIEvents = func(wait bool) {
-		doneCh := make(chan struct{})
-
-		go func() { user.pollAPIEventsCh <- doneCh }()
-
-		if wait {
-			<-doneCh
+	// If it's not a fresh user check the eventID and evaluate whether it is valid. If it's a new user, we don't
+	// need to perform this check.
+	if !isNew {
+		if err := checkIrrecoverableEventID(ctx, encVault.EventID(), apiUser.ID, syncConfigDir, user); err != nil {
+			return nil, err
 		}
 	}
 
-	// When triggered, attempt to sync the user.
-	user.goSync = user.tasks.Trigger(func(ctx context.Context) {
-		user.log.Debug("Sync triggered")
+	// Start Event Service
+	lastEventID, err := user.eventService.Start(ctx, user.serviceGroup)
+	if err != nil {
+		return user, fmt.Errorf("failed to start event service: %w", err)
+	}
 
-		user.abortable.Do(ctx, func(ctx context.Context) {
-			if user.vault.SyncStatus().IsComplete() {
-				user.log.Debug("Sync is already complete, skipping")
-			} else if err := user.doSync(ctx); err != nil {
-				user.log.WithError(err).Error("Failed to sync, will retry later")
-				time.AfterFunc(SyncRetryCooldown, user.goSync)
-			}
-		})
-	})
+	// Start Telemetry Service
+	user.telemetryService.Start(ctx, user.serviceGroup)
 
-	// Trigger an initial sync (if necessary).
-	user.goSync()
+	// Start Identity Service
+	user.identityService.Start(ctx, user.serviceGroup)
+
+	// Start SMTP Service
+	if err := user.smtpService.Start(ctx, user.serviceGroup); err != nil {
+		return user, fmt.Errorf("failed to start smtp service: %w", err)
+	}
+
+	// Start IMAP Service
+	if err := user.imapService.Start(ctx, user.serviceGroup, syncService, lastEventID); err != nil {
+		return user, fmt.Errorf("failed to start imap service: %w", err)
+	}
+
+	user.eventService.Resume()
 
 	return user, nil
 }
 
 // ID returns the user's ID.
 func (user *User) ID() string {
-	return safe.RLockRet(func() string {
-		return user.apiUser.ID
-	}, user.apiUserLock)
+	return user.id
 }
 
 // Name returns the user's username.
 func (user *User) Name() string {
-	return safe.RLockRet(func() string {
-		return user.apiUser.Name
-	}, user.apiUserLock)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
+
+	apiUser, err := user.identityService.GetAPIUser(ctx)
+	if err != nil {
+		return ""
+	}
+
+	return apiUser.Name
 }
 
 // Match matches the given query against the user's username and email addresses.
 func (user *User) Match(query string) bool {
-	return safe.RLockRet(func() bool {
-		if query == user.apiUser.Name {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
+
+	apiUser, err := user.identityService.GetAPIUser(ctx)
+	if err != nil {
+		return false
+	}
+
+	if query == apiUser.Name {
+		return true
+	}
+
+	apiAddrs, err := user.identityService.GetAddresses(ctx)
+	if err != nil {
+		return false
+	}
+
+	for _, addr := range apiAddrs {
+		if query == addr.Email {
 			return true
 		}
+	}
 
-		for _, addr := range user.apiAddrs {
-			if query == addr.Email {
-				return true
-			}
-		}
-
-		return false
-	}, user.apiUserLock, user.apiAddrsLock)
+	return false
 }
 
-// Emails returns all the user's email addresses.
+// DisplayNames returns a map of the email addresses and their associated display names.
+func (user *User) DisplayNames() map[string]string {
+	addresses := user.protonAddresses()
+	if addresses == nil {
+		return nil
+	}
+
+	result := make(map[string]string)
+	for _, address := range addresses {
+		result[address.Email] = address.DisplayName
+	}
+
+	return result
+}
+
+// Emails returns all the user's active email addresses.
 // It returns them in sorted order; the user's primary address is first.
 func (user *User) Emails() []string {
-	return safe.RLockRet(func() []string {
-		addresses := maps.Values(user.apiAddrs)
+	addresses := user.protonAddresses()
+	if addresses == nil {
+		return nil
+	}
 
-		slices.SortFunc(addresses, func(a, b proton.Address) bool {
-			return a.Order < b.Order
-		})
-
-		return xslices.Map(addresses, func(addr proton.Address) string {
-			return addr.Email
-		})
-	}, user.apiAddrsLock)
+	return xslices.Map(addresses, func(addr proton.Address) string {
+		return addr.Email
+	})
 }
 
 // GetAddressMode returns the user's current address mode.
@@ -286,32 +413,63 @@ func (user *User) GetAddressMode() vault.AddressMode {
 }
 
 // SetAddressMode sets the user's address mode.
-func (user *User) SetAddressMode(_ context.Context, mode vault.AddressMode) error {
+func (user *User) SetAddressMode(ctx context.Context, mode vault.AddressMode) error {
 	user.log.WithField("mode", mode).Info("Setting address mode")
 
-	user.abortable.Abort()
-	defer user.goSync()
+	if err := user.vault.SetAddressMode(mode); err != nil {
+		return fmt.Errorf("failed to set address mode: %w", err)
+	}
 
-	return safe.LockRet(func() error {
-		user.initUpdateCh(mode)
+	if err := user.smtpService.SetAddressMode(ctx, usertypes.VaultToAddressMode(mode)); err != nil {
+		return fmt.Errorf("failed to set smtp address mode: %w", err)
+	}
 
-		if err := user.vault.SetAddressMode(mode); err != nil {
-			return fmt.Errorf("failed to set address mode: %w", err)
-		}
+	if err := user.imapService.SetAddressMode(ctx, usertypes.VaultToAddressMode(mode)); err != nil {
+		return fmt.Errorf("failed to imap address mode: %w", err)
+	}
 
-		if err := user.vault.ClearSyncStatus(); err != nil {
-			return fmt.Errorf("failed to clear sync status: %w", err)
-		}
+	return nil
+}
 
-		return nil
-	}, user.apiAddrsLock, user.updateChLock)
+// BadEventFeedbackResync sends user feedback whether should do message re-sync.
+func (user *User) BadEventFeedbackResync(ctx context.Context) error {
+	if err := user.imapService.OnBadEventResync(ctx); err != nil {
+		return fmt.Errorf("failed to execute bad event request on imap service: %w", err)
+	}
+
+	if err := user.identityService.Resync(ctx); err != nil {
+		return fmt.Errorf("failed to resync identity service: %w", err)
+	}
+
+	if err := user.smtpService.Resync(ctx); err != nil {
+		return fmt.Errorf("failed to resync smtp service: %w", err)
+	}
+
+	if err := user.imapService.Resync(ctx); err != nil {
+		return fmt.Errorf("failed to resync imap service: %w", err)
+	}
+
+	user.eventService.Resume()
+
+	return nil
+}
+
+func (user *User) OnBadEvent(ctx context.Context) {
+	if err := user.imapService.OnBadEvent(ctx); err != nil {
+		user.log.WithError(err).Error("Failed to notify imap service of bad event")
+	}
 }
 
 // SetShowAllMail sets whether to show the All Mail mailbox.
 func (user *User) SetShowAllMail(show bool) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
+
 	user.log.WithField("show", show).Info("Setting show all mail")
 
-	atomic.StoreUint32(&user.showAllMail, b32(show))
+	if err := user.imapService.ShowAllMail(ctx, show); err != nil {
+		user.log.WithError(err).Error("Failed to set show all mail")
+	}
 }
 
 // GetGluonIDs returns the users gluon IDs.
@@ -321,12 +479,25 @@ func (user *User) GetGluonIDs() map[string]string {
 
 // GetGluonID returns the gluon ID for the given address, if present.
 func (user *User) GetGluonID(addrID string) (string, bool) {
-	gluonID, ok := user.vault.GetGluonIDs()[addrID]
-	if !ok {
+	if gluonID, ok := user.vault.GetGluonIDs()[addrID]; ok {
+		return gluonID, true
+	}
+
+	if user.vault.AddressMode() != vault.CombinedMode {
 		return "", false
 	}
 
-	return gluonID, true
+	// If there is only one address, return its gluon ID.
+	// This can happen if we are in combined mode and the primary address ID has changed.
+	if gluonIDs := maps.Values(user.vault.GetGluonIDs()); len(gluonIDs) == 1 {
+		if err := user.vault.SetGluonID(addrID, gluonIDs[0]); err != nil {
+			user.log.WithError(err).Error("Failed to set gluon ID for updated primary address")
+		}
+
+		return gluonIDs[0], true
+	}
+
+	return "", false
 }
 
 // SetGluonID sets the gluon ID for the given address.
@@ -360,17 +531,29 @@ func (user *User) BridgePass() []byte {
 }
 
 // UsedSpace returns the total space used by the user on the API.
-func (user *User) UsedSpace() int {
-	return safe.RLockRet(func() int {
-		return user.apiUser.UsedSpace
-	}, user.apiUserLock)
+func (user *User) UsedSpace() uint64 {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
+
+	apiUser, err := user.identityService.GetAPIUser(ctx)
+	if err != nil {
+		return 0
+	}
+
+	return apiUser.UsedSpace
 }
 
 // MaxSpace returns the amount of space the user can use on the API.
-func (user *User) MaxSpace() int {
-	return safe.RLockRet(func() int {
-		return user.apiUser.MaxSpace
-	}, user.apiUserLock)
+func (user *User) MaxSpace() uint64 {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
+
+	apiUser, err := user.identityService.GetAPIUser(ctx)
+	if err != nil {
+		return 0
+	}
+
+	return apiUser.MaxSpace
 }
 
 // GetEventCh returns a channel which notifies of events happening to the user (such as deauth, address change).
@@ -378,96 +561,13 @@ func (user *User) GetEventCh() <-chan events.Event {
 	return user.eventCh.GetChannel()
 }
 
-// NewIMAPConnector returns an IMAP connector for the given address.
-// If not in split mode, this must be the primary address.
-func (user *User) NewIMAPConnector(addrID string) connector.Connector {
-	return newIMAPConnector(user, addrID)
-}
-
-// NewIMAPConnectors returns IMAP connectors for each of the user's addresses.
-// In combined mode, this is just the user's primary address.
-// In split mode, this is all the user's addresses.
-func (user *User) NewIMAPConnectors() (map[string]connector.Connector, error) {
-	return safe.RLockRetErr(func() (map[string]connector.Connector, error) {
-		imapConn := make(map[string]connector.Connector)
-
-		switch user.vault.AddressMode() {
-		case vault.CombinedMode:
-			primAddr, err := getAddrIdx(user.apiAddrs, 0)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get primary address: %w", err)
-			}
-
-			imapConn[primAddr.ID] = newIMAPConnector(user, primAddr.ID)
-
-		case vault.SplitMode:
-			for addrID := range user.apiAddrs {
-				imapConn[addrID] = newIMAPConnector(user, addrID)
-			}
-		}
-
-		return imapConn, nil
-	}, user.apiAddrsLock)
-}
-
-// SendMail sends an email from the given address to the given recipients.
-//
-// nolint:funlen
-func (user *User) SendMail(authID string, from string, to []string, r io.Reader) error {
-	defer user.goPollAPIEvents(true)
-
-	if len(to) == 0 {
-		return ErrInvalidRecipient
-	}
-
-	return user.sendMail(authID, from, to, r)
-}
-
 // CheckAuth returns whether the given email and password can be used to authenticate over IMAP or SMTP with this user.
 // It returns the address ID of the authenticated address.
 func (user *User) CheckAuth(email string, password []byte) (string, error) {
-	user.log.WithField("email", logging.Sensitive(email)).Debug("Checking authentication")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
 
-	if email == "crash@bandicoot" {
-		panic("your wish is my command.. I crash")
-	}
-
-	dec, err := algo.B64RawDecode(password)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode password: %w", err)
-	}
-
-	if subtle.ConstantTimeCompare(user.vault.BridgePass(), dec) != 1 {
-		return "", fmt.Errorf("invalid password")
-	}
-
-	return safe.RLockRetErr(func() (string, error) {
-		for _, addr := range user.apiAddrs {
-			if addr.Status != proton.AddressStatusEnabled {
-				continue
-			}
-
-			if strings.EqualFold(addr.Email, email) {
-				return addr.ID, nil
-			}
-		}
-
-		return "", fmt.Errorf("invalid email")
-	}, user.apiAddrsLock)
-}
-
-// OnStatusUp is called when the connection goes up.
-func (user *User) OnStatusUp(context.Context) {
-	user.log.Info("Connection is up")
-
-	user.goSync()
-}
-
-// OnStatusDown is called when the connection goes down.
-func (user *User) OnStatusDown(context.Context) {
-	user.log.Info("Connection is down")
-
-	user.abortable.Abort()
+	return user.identityService.CheckAuth(ctx, email, password)
 }
 
 // Logout logs the user out from the API.
@@ -476,7 +576,24 @@ func (user *User) Logout(ctx context.Context, withAPI bool) error {
 
 	user.log.Debug("Canceling ongoing tasks")
 
+	if err := user.smtpService.OnLogout(ctx); err != nil {
+		return fmt.Errorf("failed to remove user from smtp server: %w", err)
+	}
+
+	if err := user.imapService.OnLogout(ctx); err != nil {
+		return fmt.Errorf("failed to remove user from imap server: %w", err)
+	}
+
 	user.tasks.CancelAndWait()
+
+	// Stop Services
+	user.serviceGroup.CancelAndWait()
+
+	// Cleanup Event Service.
+	user.eventService.Close()
+
+	// Close imap service.
+	user.imapService.Close()
 
 	if withAPI {
 		user.log.Debug("Logging out from API")
@@ -502,15 +619,17 @@ func (user *User) Close() {
 	// Stop any ongoing background tasks.
 	user.tasks.CancelAndWait()
 
+	// Stop Services
+	user.serviceGroup.CancelAndWait()
+
+	// Cleanup Event Service.
+	user.eventService.Close()
+
+	// Close imap service.
+	user.imapService.Close()
+
 	// Close the user's API client.
 	user.client.Close()
-
-	// Close the user's update channels.
-	safe.RLock(func() {
-		for _, updateCh := range xslices.Unique(maps.Values(user.updateCh)) {
-			updateCh.CloseAndDiscardQueued()
-		}
-	}, user.updateChLock)
 
 	// Close the user's notify channel.
 	user.eventCh.CloseAndDiscardQueued()
@@ -521,80 +640,80 @@ func (user *User) Close() {
 	}
 }
 
-// initUpdateCh initializes the user's update channels in the given address mode.
-// It is assumed that user.apiAddrs and user.updateCh are already locked.
-func (user *User) initUpdateCh(mode vault.AddressMode) {
-	for _, updateCh := range xslices.Unique(maps.Values(user.updateCh)) {
-		updateCh.CloseAndDiscardQueued()
-	}
-
-	user.updateCh = make(map[string]*queue.QueuedChannel[imap.Update])
-
-	switch mode {
-	case vault.CombinedMode:
-		primaryUpdateCh := queue.NewQueuedChannel[imap.Update](0, 0)
-
-		for addrID := range user.apiAddrs {
-			user.updateCh[addrID] = primaryUpdateCh
-		}
-
-	case vault.SplitMode:
-		for addrID := range user.apiAddrs {
-			user.updateCh[addrID] = queue.NewQueuedChannel[imap.Update](0, 0)
-		}
-	}
+// IsTelemetryEnabled check if the telemetry is enabled or disabled for this user.
+func (user *User) IsTelemetryEnabled(ctx context.Context) bool {
+	return user.telemetryService.IsTelemetryEnabled(ctx)
 }
 
-// doEventPoll is called whenever API events should be polled.
-func (user *User) doEventPoll(ctx context.Context) error {
-	event, err := user.client.GetEvent(ctx, user.vault.EventID())
+// SendTelemetry send telemetry request.
+func (user *User) SendTelemetry(ctx context.Context, data []byte) error {
+	var req proton.SendStatsReq
+	if err := json.Unmarshal(data, &req); err != nil {
+		user.log.WithError(err).Error("Failed to build telemetry request.")
+		if err := user.reporter.ReportMessageWithContext("Failed to build telemetry request.", reporter.Context{
+			"error": err,
+		}); err != nil {
+			logrus.WithError(err).Error("Failed to report telemetry request build error")
+		}
+		return err
+	}
+	err := user.client.SendDataEvent(ctx, req)
 	if err != nil {
-		return fmt.Errorf("failed to get event: %w", err)
+		user.log.WithError(err).Error("Failed to send telemetry.")
+		return err
 	}
-
-	if event.EventID != user.vault.EventID() {
-		user.log.WithFields(logrus.Fields{
-			"old": user.vault.EventID(),
-			"new": event,
-		}).Info("Received new API event")
-
-		// Handle the event.
-		if err := user.handleAPIEvent(ctx, event); err != nil {
-			return fmt.Errorf("failed to handle event: %w", err)
-		}
-
-		user.log.WithField("event", event).Debug("Handled API event")
-
-		// Wait for all events to be applied.
-		safe.RLock(func() {
-			for _, updateCh := range xslices.Unique(maps.Values(user.updateCh)) {
-				update := imap.NewNoop()
-				defer update.WaitContext(ctx)
-
-				updateCh.Enqueue(update)
-			}
-		}, user.updateChLock)
-
-		user.log.WithField("event", event).Debug("All events applied to gluon")
-
-		// Update the event ID in the vault.
-		if err := user.vault.SetEventID(event.EventID); err != nil {
-			return fmt.Errorf("failed to update event ID: %w", err)
-		}
-
-		user.log.WithField("eventID", event.EventID).Debug("Updated event ID in vault")
-	} else {
-		user.log.Debug("No new API events")
-	}
-
 	return nil
 }
 
-// b32 returns a uint32 0 or 1 representing b.
-func b32(b bool) uint32 {
-	if b {
-		return 1
+func (user *User) ReportSMTPAuthFailed(username string) {
+	emails := user.Emails()
+	for _, mail := range emails {
+		if mail == username {
+			user.ReportConfigStatusFailure("SMTP invalid username or password")
+		}
+	}
+}
+
+func (user *User) ReportSMTPAuthSuccess(ctx context.Context) {
+	user.SendConfigStatusSuccess(ctx)
+}
+
+func (user *User) GetSMTPService() *smtp.Service {
+	return user.smtpService
+}
+
+func (user *User) PublishEvent(_ context.Context, event events.Event) {
+	user.eventCh.Enqueue(event)
+}
+
+func (user *User) PauseEventLoop() {
+	user.eventService.Pause()
+}
+
+func (user *User) PauseEventLoopWithWaiter() *userevents.EventPollWaiter {
+	return user.eventService.PauseWithWaiter()
+}
+
+func (user *User) ResumeEventLoop() {
+	user.eventService.Resume()
+}
+
+func (user *User) protonAddresses() []proton.Address {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
+
+	apiAddrs, err := user.identityService.GetAddresses(ctx)
+	if err != nil {
+		return nil
 	}
 
-	return 0
+	addresses := xslices.Filter(maps.Values(apiAddrs), func(addr proton.Address) bool {
+		return addr.Status == proton.AddressStatusEnabled && addr.Type != proton.AddressTypeExternal
+	})
+
+	slices.SortFunc(addresses, func(a, b proton.Address) bool {
+		return a.Order < b.Order
+	})
+
+	return addresses
 }

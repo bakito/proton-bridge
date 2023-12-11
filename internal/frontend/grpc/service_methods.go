@@ -21,22 +21,20 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"os"
-	"path/filepath"
 	"runtime"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/frontend/theme"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
+	"github.com/ProtonMail/proton-bridge/v3/internal/service"
 	"github.com/ProtonMail/proton-bridge/v3/internal/updater"
-	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/ports"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/exp/maps"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/runtime/protoimpl"
@@ -45,14 +43,14 @@ import (
 )
 
 // CheckTokens implements the CheckToken gRPC service call.
-func (s *Service) CheckTokens(ctx context.Context, clientConfigPath *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
+func (s *Service) CheckTokens(_ context.Context, clientConfigPath *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
 	s.log.Debug("CheckTokens")
 
 	path := clientConfigPath.Value
 	logEntry := s.log.WithField("path", path)
 
-	var clientConfig Config
-	if err := clientConfig.load(path); err != nil {
+	var clientConfig service.Config
+	if err := clientConfig.Load(path); err != nil {
 		logEntry.WithError(err).Error("Could not read gRPC client config file")
 
 		return nil, err
@@ -63,7 +61,7 @@ func (s *Service) CheckTokens(ctx context.Context, clientConfigPath *wrapperspb.
 	return &wrapperspb.StringValue{Value: clientConfig.Token}, nil
 }
 
-func (s *Service) AddLogEntry(ctx context.Context, request *AddLogEntryRequest) (*emptypb.Empty, error) {
+func (s *Service) AddLogEntry(_ context.Context, request *AddLogEntryRequest) (*emptypb.Empty, error) {
 	entry := s.log
 
 	if len(request.Package) > 0 {
@@ -91,15 +89,21 @@ func (s *Service) AddLogEntry(ctx context.Context, request *AddLogEntryRequest) 
 }
 
 // GuiReady implement the GuiReady gRPC service call.
-func (s *Service) GuiReady(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+func (s *Service) GuiReady(_ context.Context, _ *emptypb.Empty) (*GuiReadyResponse, error) {
 	s.log.Debug("GuiReady")
 
 	s.initializationDone.Do(s.initializing.Done)
-	return &emptypb.Empty{}, nil
+
+	// Splash screen should be displayed only to users who start v3.0.17 or later for the first time after upgrading from v2.
+	return &GuiReadyResponse{
+		ShowSplashScreen: (!s.bridge.GetFirstStart()) &&
+			s.bridge.GetLastVersion().LessThan(semver.MustParse("3.0.0")) &&
+			s.bridge.GetCurrentVersion().GreaterThan(semver.MustParse("3.0.16")),
+	}, nil
 }
 
 // Quit implement the Quit gRPC service call.
-func (s *Service) Quit(ctx context.Context, empty *emptypb.Empty) (*emptypb.Empty, error) {
+func (s *Service) Quit(_ context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
 	s.log.Debug("Quit")
 	return &emptypb.Empty{}, s.quit()
 }
@@ -107,6 +111,8 @@ func (s *Service) Quit(ctx context.Context, empty *emptypb.Empty) (*emptypb.Empt
 func (s *Service) quit() error {
 	// Windows is notably slow at Quitting. We do it in a goroutine to speed things up a bit.
 	go func() {
+		defer async.HandlePanic(s.panicHandler)
+
 		if s.parentPID >= 0 {
 			s.parentPIDDoneCh <- struct{}{}
 		}
@@ -133,31 +139,13 @@ func (s *Service) Restart(ctx context.Context, empty *emptypb.Empty) (*emptypb.E
 	return s.Quit(ctx, empty)
 }
 
-func (s *Service) ShowOnStartup(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+func (s *Service) ShowOnStartup(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
 	s.log.Debug("ShowOnStartup")
 
 	return wrapperspb.Bool(s.showOnStartup), nil
 }
 
-func (s *Service) ShowSplashScreen(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
-	s.log.Debug("ShowSplashScreen")
-
-	if s.bridge.GetFirstStart() {
-		return wrapperspb.Bool(false), nil
-	}
-
-	// Current splash screen contains update on rebranding. Therefore, it
-	// should be shown only if the last used version was less than 2.2.0.
-	return wrapperspb.Bool(s.bridge.GetLastVersion().LessThan(semver.MustParse("2.2.0"))), nil
-}
-
-func (s *Service) IsFirstGuiStart(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
-	s.log.Debug("IsFirstGuiStart")
-
-	return wrapperspb.Bool(s.bridge.GetFirstStartGUI()), nil
-}
-
-func (s *Service) SetIsAutostartOn(ctx context.Context, isOn *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+func (s *Service) SetIsAutostartOn(_ context.Context, isOn *wrapperspb.BoolValue) (*emptypb.Empty, error) {
 	s.log.WithField("show", isOn.Value).Debug("SetIsAutostartOn")
 
 	defer func() { _ = s.SendEvent(NewToggleAutostartFinishedEvent()) }()
@@ -177,13 +165,13 @@ func (s *Service) SetIsAutostartOn(ctx context.Context, isOn *wrapperspb.BoolVal
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) IsAutostartOn(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+func (s *Service) IsAutostartOn(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
 	s.log.Debug("IsAutostartOn")
 
 	return wrapperspb.Bool(s.bridge.GetAutostart()), nil
 }
 
-func (s *Service) SetIsBetaEnabled(ctx context.Context, isEnabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+func (s *Service) SetIsBetaEnabled(_ context.Context, isEnabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
 	s.log.WithField("isEnabled", isEnabled.Value).Debug("SetIsBetaEnabled")
 
 	channel := updater.StableChannel
@@ -199,13 +187,13 @@ func (s *Service) SetIsBetaEnabled(ctx context.Context, isEnabled *wrapperspb.Bo
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) IsBetaEnabled(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+func (s *Service) IsBetaEnabled(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
 	s.log.Debug("IsBetaEnabled")
 
 	return wrapperspb.Bool(s.bridge.GetUpdateChannel() == updater.EarlyChannel), nil
 }
 
-func (s *Service) SetIsAllMailVisible(ctx context.Context, isVisible *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+func (s *Service) SetIsAllMailVisible(_ context.Context, isVisible *wrapperspb.BoolValue) (*emptypb.Empty, error) {
 	s.log.WithField("isVisible", isVisible.Value).Debug("SetIsAllMailVisible")
 
 	if err := s.bridge.SetShowAllMail(isVisible.Value); err != nil {
@@ -216,35 +204,53 @@ func (s *Service) SetIsAllMailVisible(ctx context.Context, isVisible *wrapperspb
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) IsAllMailVisible(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+func (s *Service) IsAllMailVisible(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
 	s.log.Debug("IsAllMailVisible")
 
 	return wrapperspb.Bool(s.bridge.GetShowAllMail()), nil
 }
 
-func (s *Service) GoOs(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) SetIsTelemetryDisabled(_ context.Context, isDisabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+	s.log.WithField("isEnabled", isDisabled.Value).Debug("SetIsTelemetryDisabled")
+
+	if err := s.bridge.SetTelemetryDisabled(isDisabled.Value); err != nil {
+		s.log.WithError(err).Error("Failed to set telemetry status")
+		return nil, status.Errorf(codes.Internal, "failed to set telemetry status: %v", err)
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (s *Service) IsTelemetryDisabled(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	s.log.Debug("IsTelemetryDisabled")
+
+	return wrapperspb.Bool(s.bridge.GetTelemetryDisabled()), nil
+}
+
+func (s *Service) GoOs(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("GoOs") // TO-DO We can probably get rid of this and use QSysInfo::product name
 
 	return wrapperspb.String(runtime.GOOS), nil
 }
 
-func (s *Service) TriggerReset(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+func (s *Service) TriggerReset(_ context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
 	s.log.Debug("TriggerReset")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
+
 		s.triggerReset()
 	}()
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) Version(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) Version(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("Version")
 
 	return wrapperspb.String(s.bridge.GetCurrentVersion().Original()), nil
 }
 
-func (s *Service) LogsPath(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) LogsPath(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("LogsPath")
 
 	path, err := s.bridge.GetLogsPath()
@@ -255,7 +261,7 @@ func (s *Service) LogsPath(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.S
 	return wrapperspb.String(path), nil
 }
 
-func (s *Service) LicensePath(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) LicensePath(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("LicensePath")
 
 	return wrapperspb.String(s.bridge.GetLicenseFilePath()), nil
@@ -265,7 +271,7 @@ func (s *Service) DependencyLicensesLink(_ context.Context, _ *emptypb.Empty) (*
 	return wrapperspb.String(s.bridge.GetDependencyLicensesLink()), nil
 }
 
-func (s *Service) ReleaseNotesPageLink(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) ReleaseNotesPageLink(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.latestLock.RLock()
 	defer s.latestLock.RUnlock()
 
@@ -279,7 +285,7 @@ func (s *Service) LandingPageLink(_ context.Context, _ *emptypb.Empty) (*wrapper
 	return wrapperspb.String(s.latest.LandingPage), nil
 }
 
-func (s *Service) SetColorSchemeName(ctx context.Context, name *wrapperspb.StringValue) (*emptypb.Empty, error) {
+func (s *Service) SetColorSchemeName(_ context.Context, name *wrapperspb.StringValue) (*emptypb.Empty, error) {
 	s.log.WithField("ColorSchemeName", name.Value).Debug("SetColorSchemeName")
 
 	if !theme.IsAvailable(theme.Theme(name.Value)) {
@@ -295,7 +301,7 @@ func (s *Service) SetColorSchemeName(ctx context.Context, name *wrapperspb.Strin
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) ColorSchemeName(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) ColorSchemeName(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("ColorSchemeName")
 
 	current := s.bridge.GetColorScheme()
@@ -310,16 +316,17 @@ func (s *Service) ColorSchemeName(ctx context.Context, _ *emptypb.Empty) (*wrapp
 	return wrapperspb.String(current), nil
 }
 
-func (s *Service) CurrentEmailClient(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) CurrentEmailClient(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("CurrentEmailClient")
 
 	return wrapperspb.String(s.bridge.GetCurrentUserAgent()), nil
 }
 
-func (s *Service) ReportBug(ctx context.Context, report *ReportBugRequest) (*emptypb.Empty, error) {
+func (s *Service) ReportBug(_ context.Context, report *ReportBugRequest) (*emptypb.Empty, error) {
 	s.log.WithFields(logrus.Fields{
 		"osType":      report.OsType,
 		"osVersion":   report.OsVersion,
+		"title":       report.Title,
 		"description": report.Description,
 		"address":     report.Address,
 		"emailClient": report.EmailClient,
@@ -327,18 +334,20 @@ func (s *Service) ReportBug(ctx context.Context, report *ReportBugRequest) (*emp
 	}).Debug("ReportBug")
 
 	go func() {
-		defer func() { _ = s.SendEvent(NewReportBugFinishedEvent()) }()
+		defer async.HandlePanic(s.panicHandler)
 
-		if err := s.bridge.ReportBug(
-			context.Background(),
-			report.OsType,
-			report.OsVersion,
-			report.Description,
-			report.Address,
-			report.Address,
-			report.EmailClient,
-			report.IncludeLogs,
-		); err != nil {
+		defer func() { _ = s.SendEvent(NewReportBugFinishedEvent()) }()
+		reportReq := bridge.ReportBugReq{
+			OSType:      report.OsType,
+			OSVersion:   report.OsVersion,
+			Title:       report.Title,
+			Description: report.Description,
+			Username:    report.Address,
+			Email:       report.Address,
+			EmailClient: report.EmailClient,
+			IncludeLogs: report.IncludeLogs,
+		}
+		if err := s.bridge.ReportBug(context.Background(), &reportReq); err != nil {
 			s.log.WithError(err).Error("Failed to report bug")
 			_ = s.SendEvent(NewReportBugErrorEvent())
 			return
@@ -350,27 +359,7 @@ func (s *Service) ReportBug(ctx context.Context, report *ReportBugRequest) (*emp
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) ExportTLSCertificates(_ context.Context, folderPath *wrapperspb.StringValue) (*emptypb.Empty, error) {
-	s.log.WithField("folderPath", folderPath).Info("ExportTLSCertificates")
-
-	go func() {
-		defer s.panicHandler.HandlePanic()
-
-		cert, key := s.bridge.GetBridgeTLSCert()
-
-		if err := os.WriteFile(filepath.Join(folderPath.Value, "cert.pem"), cert, 0o600); err != nil {
-			_ = s.SendEvent(NewGenericErrorEvent(ErrorCode_TLS_CERT_EXPORT_ERROR))
-		}
-
-		if err := os.WriteFile(filepath.Join(folderPath.Value, "key.pem"), key, 0o600); err != nil {
-			_ = s.SendEvent(NewGenericErrorEvent(ErrorCode_TLS_KEY_EXPORT_ERROR))
-		}
-	}()
-
-	return &emptypb.Empty{}, nil
-}
-
-func (s *Service) ForceLauncher(ctx context.Context, launcher *wrapperspb.StringValue) (*emptypb.Empty, error) {
+func (s *Service) ForceLauncher(_ context.Context, launcher *wrapperspb.StringValue) (*emptypb.Empty, error) {
 	s.log.WithField("launcher", launcher.Value).Debug("ForceLauncher")
 
 	s.restarter.Override(launcher.Value)
@@ -378,7 +367,7 @@ func (s *Service) ForceLauncher(ctx context.Context, launcher *wrapperspb.String
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) SetMainExecutable(ctx context.Context, exe *wrapperspb.StringValue) (*emptypb.Empty, error) {
+func (s *Service) SetMainExecutable(_ context.Context, exe *wrapperspb.StringValue) (*emptypb.Empty, error) {
 	s.log.WithField("executable", exe.Value).Debug("SetMainExecutable")
 
 	s.restarter.AddFlags("--wait", exe.Value)
@@ -386,12 +375,13 @@ func (s *Service) SetMainExecutable(ctx context.Context, exe *wrapperspb.StringV
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) Login(ctx context.Context, login *LoginRequest) (*emptypb.Empty, error) {
+func (s *Service) Login(_ context.Context, login *LoginRequest) (*emptypb.Empty, error) {
 	s.log.WithField("username", login.Username).Debug("Login")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
+		s.twoPasswordAttemptCount = 0
 		password, err := base64Decode(login.Password)
 		if err != nil {
 			s.log.WithError(err).Error("Cannot decode password")
@@ -405,9 +395,9 @@ func (s *Service) Login(ctx context.Context, login *LoginRequest) (*emptypb.Empt
 
 			if errors.Is(err, bridge.ErrUserAlreadyLoggedIn) {
 				_ = s.SendEvent(NewLoginAlreadyLoggedInEvent(auth.UserID))
-			} else if apiErr := new(proton.Error); errors.As(err, &apiErr) {
+			} else if apiErr := new(proton.APIError); errors.As(err, &apiErr) {
 				switch apiErr.Code { // nolint:exhaustive
-				case proton.PasswordWrong:
+				case proton.PasswordWrong, proton.UsernameInvalid:
 					_ = s.SendEvent(NewLoginError(LoginErrorType_USERNAME_PASSWORD_ERROR, ""))
 
 				case proton.PaidPlanRequired:
@@ -432,7 +422,7 @@ func (s *Service) Login(ctx context.Context, login *LoginRequest) (*emptypb.Empt
 			_ = s.SendEvent(NewLoginTfaRequestedEvent(login.Username))
 
 		case auth.PasswordMode == proton.TwoPasswordMode:
-			_ = s.SendEvent(NewLoginTwoPasswordsRequestedEvent())
+			_ = s.SendEvent(NewLoginTwoPasswordsRequestedEvent(login.Username))
 
 		default:
 			s.finishLogin()
@@ -442,14 +432,14 @@ func (s *Service) Login(ctx context.Context, login *LoginRequest) (*emptypb.Empt
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) Login2FA(ctx context.Context, login *LoginRequest) (*emptypb.Empty, error) {
+func (s *Service) Login2FA(_ context.Context, login *LoginRequest) (*emptypb.Empty, error) {
 	s.log.WithField("username", login.Username).Debug("Login2FA")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		if s.auth.UID == "" || s.authClient == nil {
-			s.log.Errorf("Login 2FA: authethication incomplete %s %p", s.auth.UID, s.authClient)
+			s.log.Errorf("Login 2FA: authentication incomplete %s %p", s.auth.UID, s.authClient)
 			_ = s.SendEvent(NewLoginError(LoginErrorType_TFA_ABORT, "Missing authentication, try again."))
 			s.loginClean()
 			return
@@ -464,7 +454,7 @@ func (s *Service) Login2FA(ctx context.Context, login *LoginRequest) (*emptypb.E
 		}
 
 		if err := s.authClient.Auth2FA(context.Background(), proton.Auth2FAReq{TwoFactorCode: string(twoFA)}); err != nil {
-			if apiErr := new(proton.Error); errors.As(err, &apiErr) && apiErr.Code == proton.PasswordWrong {
+			if apiErr := new(proton.APIError); errors.As(err, &apiErr) && apiErr.Code == proton.PasswordWrong {
 				s.log.Warn("Login 2FA: retry 2fa")
 				_ = s.SendEvent(NewLoginError(LoginErrorType_TFA_ERROR, ""))
 			} else {
@@ -477,7 +467,7 @@ func (s *Service) Login2FA(ctx context.Context, login *LoginRequest) (*emptypb.E
 		}
 
 		if s.auth.PasswordMode == proton.TwoPasswordMode {
-			_ = s.SendEvent(NewLoginTwoPasswordsRequestedEvent())
+			_ = s.SendEvent(NewLoginTwoPasswordsRequestedEvent(login.Username))
 			return
 		}
 
@@ -487,11 +477,11 @@ func (s *Service) Login2FA(ctx context.Context, login *LoginRequest) (*emptypb.E
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) Login2Passwords(ctx context.Context, login *LoginRequest) (*emptypb.Empty, error) {
+func (s *Service) Login2Passwords(_ context.Context, login *LoginRequest) (*emptypb.Empty, error) {
 	s.log.WithField("username", login.Username).Debug("Login2Passwords")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		password, err := base64Decode(login.Password)
 		if err != nil {
@@ -509,11 +499,11 @@ func (s *Service) Login2Passwords(ctx context.Context, login *LoginRequest) (*em
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) LoginAbort(ctx context.Context, loginAbort *LoginAbortRequest) (*emptypb.Empty, error) {
+func (s *Service) LoginAbort(_ context.Context, loginAbort *LoginAbortRequest) (*emptypb.Empty, error) {
 	s.log.WithField("username", loginAbort.Username).Debug("LoginAbort")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		s.loginAbort()
 	}()
@@ -525,7 +515,7 @@ func (s *Service) CheckUpdate(context.Context, *emptypb.Empty) (*emptypb.Empty, 
 	s.log.Debug("CheckUpdate")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		updateCh, done := s.bridge.GetEvents(
 			events.UpdateAvailable{},
@@ -553,11 +543,11 @@ func (s *Service) CheckUpdate(context.Context, *emptypb.Empty) (*emptypb.Empty, 
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) InstallUpdate(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+func (s *Service) InstallUpdate(_ context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
 	s.log.Debug("InstallUpdate")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		safe.RLock(func() {
 			s.bridge.InstallUpdate(s.target)
@@ -567,7 +557,7 @@ func (s *Service) InstallUpdate(ctx context.Context, _ *emptypb.Empty) (*emptypb
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) SetIsAutomaticUpdateOn(ctx context.Context, isOn *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+func (s *Service) SetIsAutomaticUpdateOn(_ context.Context, isOn *wrapperspb.BoolValue) (*emptypb.Empty, error) {
 	s.log.WithField("isOn", isOn.Value).Debug("SetIsAutomaticUpdateOn")
 
 	if currentlyOn := s.bridge.GetAutoUpdate(); currentlyOn == isOn.Value {
@@ -582,22 +572,24 @@ func (s *Service) SetIsAutomaticUpdateOn(ctx context.Context, isOn *wrapperspb.B
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) IsAutomaticUpdateOn(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+func (s *Service) IsAutomaticUpdateOn(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
 	s.log.Debug("IsAutomaticUpdateOn")
 
 	return wrapperspb.Bool(s.bridge.GetAutoUpdate()), nil
 }
 
-func (s *Service) DiskCachePath(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) DiskCachePath(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("DiskCachePath")
 
-	return wrapperspb.String(s.bridge.GetGluonDir()), nil
+	return wrapperspb.String(s.bridge.GetGluonCacheDir()), nil
 }
 
-func (s *Service) SetDiskCachePath(ctx context.Context, newPath *wrapperspb.StringValue) (*emptypb.Empty, error) {
+func (s *Service) SetDiskCachePath(_ context.Context, newPath *wrapperspb.StringValue) (*emptypb.Empty, error) {
 	s.log.WithField("path", newPath.Value).Debug("setDiskCachePath")
 
 	go func() {
+		defer async.HandlePanic(s.panicHandler)
+
 		defer func() {
 			_ = s.SendEvent(NewDiskCachePathChangeFinishedEvent())
 		}()
@@ -609,21 +601,21 @@ func (s *Service) SetDiskCachePath(ctx context.Context, newPath *wrapperspb.Stri
 			path = path[1:]
 		}
 
-		if path != s.bridge.GetGluonDir() {
+		if path != s.bridge.GetGluonCacheDir() {
 			if err := s.bridge.SetGluonDir(context.Background(), path); err != nil {
 				s.log.WithError(err).Error("The local cache location could not be changed.")
 				_ = s.SendEvent(NewDiskCacheErrorEvent(DiskCacheErrorType_CANT_MOVE_DISK_CACHE_ERROR))
 				return
 			}
 
-			_ = s.SendEvent(NewDiskCachePathChangedEvent(s.bridge.GetGluonDir()))
+			_ = s.SendEvent(NewDiskCachePathChangedEvent(s.bridge.GetGluonCacheDir()))
 		}
 	}()
 
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) SetIsDoHEnabled(ctx context.Context, isEnabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+func (s *Service) SetIsDoHEnabled(_ context.Context, isEnabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
 	s.log.WithField("isEnabled", isEnabled.Value).Debug("SetIsDohEnabled")
 
 	if err := s.bridge.SetProxyAllowed(isEnabled.Value); err != nil {
@@ -634,7 +626,7 @@ func (s *Service) SetIsDoHEnabled(ctx context.Context, isEnabled *wrapperspb.Boo
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) IsDoHEnabled(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+func (s *Service) IsDoHEnabled(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
 	s.log.Debug("IsDohEnabled")
 
 	return wrapperspb.Bool(s.bridge.GetProxyAllowed()), nil
@@ -663,33 +655,35 @@ func (s *Service) SetMailServerSettings(_ context.Context, settings *ImapSmtpSet
 		Debug("SetConnectionMode")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		defer func() { _ = s.SendEvent(NewChangeMailServerSettingsFinishedEvent()) }()
 
+		ctx := context.Background() // async operation, we cannot use the context provided by gRPC.
+
 		if s.bridge.GetIMAPSSL() != settings.UseSSLForImap {
-			if err := s.bridge.SetIMAPSSL(settings.UseSSLForImap); err != nil {
+			if err := s.bridge.SetIMAPSSL(ctx, settings.UseSSLForImap); err != nil {
 				s.log.WithError(err).Error("Failed to set IMAP SSL")
 				_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_IMAP_CONNECTION_MODE_CHANGE_ERROR))
 			}
 		}
 
 		if s.bridge.GetSMTPSSL() != settings.UseSSLForSmtp {
-			if err := s.bridge.SetSMTPSSL(settings.UseSSLForSmtp); err != nil {
+			if err := s.bridge.SetSMTPSSL(ctx, settings.UseSSLForSmtp); err != nil {
 				s.log.WithError(err).Error("Failed to set SMTP SSL")
 				_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_SMTP_CONNECTION_MODE_CHANGE_ERROR))
 			}
 		}
 
 		if s.bridge.GetIMAPPort() != int(settings.ImapPort) {
-			if err := s.bridge.SetIMAPPort(int(settings.ImapPort)); err != nil {
+			if err := s.bridge.SetIMAPPort(ctx, int(settings.ImapPort)); err != nil {
 				s.log.WithError(err).Error("Failed to set IMAP port")
 				_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_IMAP_PORT_CHANGE_ERROR))
 			}
 		}
 
 		if s.bridge.GetSMTPPort() != int(settings.SmtpPort) {
-			if err := s.bridge.SetSMTPPort(int(settings.SmtpPort)); err != nil {
+			if err := s.bridge.SetSMTPPort(ctx, int(settings.SmtpPort)); err != nil {
 				s.log.WithError(err).Error("Failed to set SMTP port")
 				_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_SMTP_PORT_CHANGE_ERROR))
 			}
@@ -701,22 +695,22 @@ func (s *Service) SetMailServerSettings(_ context.Context, settings *ImapSmtpSet
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) Hostname(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) Hostname(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("Hostname")
 
 	return wrapperspb.String(constants.Host), nil
 }
 
-func (s *Service) IsPortFree(ctx context.Context, port *wrapperspb.Int32Value) (*wrapperspb.BoolValue, error) {
+func (s *Service) IsPortFree(_ context.Context, port *wrapperspb.Int32Value) (*wrapperspb.BoolValue, error) {
 	s.log.Debug("IsPortFree")
 
 	return wrapperspb.Bool(ports.IsPortFree(int(port.Value))), nil
 }
 
-func (s *Service) AvailableKeychains(ctx context.Context, _ *emptypb.Empty) (*AvailableKeychainsResponse, error) {
+func (s *Service) AvailableKeychains(_ context.Context, _ *emptypb.Empty) (*AvailableKeychainsResponse, error) {
 	s.log.Debug("AvailableKeychains")
 
-	return &AvailableKeychainsResponse{Keychains: maps.Keys(keychain.Helpers)}, nil
+	return &AvailableKeychainsResponse{Keychains: s.bridge.GetHelpersNames()}, nil
 }
 
 func (s *Service) SetCurrentKeychain(ctx context.Context, keychain *wrapperspb.StringValue) (*emptypb.Empty, error) {
@@ -743,7 +737,7 @@ func (s *Service) SetCurrentKeychain(ctx context.Context, keychain *wrapperspb.S
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) CurrentKeychain(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+func (s *Service) CurrentKeychain(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.log.Debug("CurrentKeychain")
 
 	helper, err := s.bridge.GetKeychainApp()

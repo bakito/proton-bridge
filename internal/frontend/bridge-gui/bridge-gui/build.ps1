@@ -75,6 +75,17 @@ function check_exit() {
 
 Write-host "Running build for version $bridgeVersion - $buildConfig in $buildDir"
 
+$REVISION_HASH = git rev-parse --short=10 HEAD
+$bridgeTag = ($env:BRIDGE_TAG)
+$bridgeDsnSentry = ($env:BRIDGE_DSN_SENTRY)
+$bridgeBuidTime = ($env:BRIDGE_BUILD_TIME)
+
+$bridgeBuildEnv = ($env:BRIDGE_BUILD_ENV)
+if ($null -eq $bridgeBuildEnv)
+{
+    $bridgeBuildEnv =  "dev"
+}
+
 git submodule update --init --recursive $vcpkgRoot
 . $vcpkgBootstrap -disableMetrics
 . $vcpkgExe install sentry-native:x64-windows grpc:x64-windows --clean-after-build
@@ -82,7 +93,12 @@ git submodule update --init --recursive $vcpkgRoot
 . $cmakeExe -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE="$buildConfig" `
                                        -DBRIDGE_APP_FULL_NAME="$bridgeFullName" `
                                        -DBRIDGE_VENDOR="$bridgeVendor" `
+                                       -DBRIDGE_REVISION="$REVISION_HASH" `
+                                       -DBRIDGE_TAG="$bridgeTag" `
                                        -DBRIDGE_APP_VERSION="$bridgeVersion" `
+                                       -DBRIDGE_BUILD_TIME="$bridgeBuidTime" `
+                                       -DBRIDGE_DSN_SENTRY="$bridgeDsnSentry" `
+                                       -DBRIDGE_BUILD_ENV="$bridgeBuildEnv" `
                                        -S . -B $buildDir
 
 check_exit "CMake failed"

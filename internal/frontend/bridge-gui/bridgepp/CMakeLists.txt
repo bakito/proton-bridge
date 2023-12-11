@@ -32,9 +32,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (NOT DEFINED BRIDGE_APP_VERSION)
     message(FATAL_ERROR "BRIDGE_APP_VERSION is not defined.")
-else()
+else ()
     message(STATUS "Bridge version is ${BRIDGE_APP_VERSION}")
-endif()
+endif ()
 
 
 #****************************************************************************************************************************************************
@@ -135,7 +135,9 @@ add_custom_command(
 
 
 add_library(bridgepp
+    bridgepp/BugReportFlow/BugReportFlow.cpp bridgepp/BugReportFlow/BugReportFlow.h
     bridgepp/BridgeUtils.cpp bridgepp/BridgeUtils.h
+    bridgepp/CLI/CLIUtils.cpp bridgepp/CLI/CLIUtils.h
     bridgepp/Exception/Exception.h bridgepp/Exception/Exception.cpp
     bridgepp/GRPC/GRPCClient.cpp bridgepp/GRPC/GRPCClient.h
     bridgepp/GRPC/GRPCErrors.h bridgepp/GRPC/GRPCErrors.cpp
@@ -146,7 +148,9 @@ add_library(bridgepp
     ${FOCUS_PROTO_CPP_FILE} ${FOCUS_PROTO_H_FILE} ${FOCUS_GRPC_CPP_FILE} ${FOCUS_GRPC_H_FILE}
     bridgepp/FocusGRPC/FocusGRPCClient.cpp bridgepp/FocusGRPC/FocusGRPCClient.h
     bridgepp/Log/Log.h bridgepp/Log/Log.cpp
+    bridgepp/Log/LogUtils.h bridgepp/Log/LogUtils.cpp
     bridgepp/ProcessMonitor.cpp bridgepp/ProcessMonitor.h
+    bridgepp/SessionID/SessionID.cpp bridgepp/SessionID/SessionID.h
     bridgepp/User/User.cpp bridgepp/User/User.h
     bridgepp/Worker/Worker.h bridgepp/Worker/Overseer.h bridgepp/Worker/Overseer.cpp)
 
@@ -159,3 +163,45 @@ target_link_libraries(bridgepp
     )
 
 target_precompile_headers(bridgepp PRIVATE Pch.h)
+
+#*****************************************************************************************************************************************************
+# GoogleTest
+#*****************************************************************************************************************************************************
+
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
+    cmake_policy(SET CMP0135 NEW) # avoid warning DOWNLOAD_EXTRACT_TIMESTAMP
+endif ()
+
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/b796f7d44681514f58a683a3a71ff17c94edb0c1.zip
+)
+
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+
+#*****************************************************************************************************************************************************
+# Tests
+#*****************************************************************************************************************************************************
+add_executable(bridgepp-test EXCLUDE_FROM_ALL
+    Test/TestBridgeUtils.cpp
+    Test/TestBugReportFlow.cpp Test/TestBugReportFlow.h
+    Test/TestCLI.cpp
+    Test/TestException.cpp
+    Test/TestSessionID.cpp
+    Test/TestWorker.cpp Test/TestWorker.h
+    )
+add_dependencies(bridgepp-test bridgepp)
+target_precompile_headers(bridgepp-test PRIVATE Pch.h)
+target_link_libraries(bridgepp-test
+    GTest::gtest_main
+    bridgepp
+    )
+
+include(GoogleTest)
+gtest_discover_tests(bridgepp-test)

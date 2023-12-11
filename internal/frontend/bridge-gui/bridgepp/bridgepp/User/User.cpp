@@ -35,7 +35,6 @@ SPUser User::newUser(QObject *parent) {
 //****************************************************************************************************************************************************
 User::User(QObject *parent)
     : QObject(parent) {
-
 }
 
 
@@ -52,6 +51,14 @@ void User::update(User const &user) {
     this->setSplitMode(user.splitMode());
     this->setUsedBytes(user.usedBytes());
     this->setTotalBytes(user.totalBytes());
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The user's primary email. If not known, return turn username
+//****************************************************************************************************************************************************
+QString User::primaryEmailOrUsername() const {
+    return addresses_.isEmpty() ? username_ : addresses_.front();
 }
 
 
@@ -286,6 +293,54 @@ void User::setTotalBytes(float totalBytes) {
 
 
 //****************************************************************************************************************************************************
+/// \return true iff a sync is in progress.
+//****************************************************************************************************************************************************
+bool User::isSyncing() const {
+    return isSyncing_;
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] syncing The new value for the sync state.
+//****************************************************************************************************************************************************
+void User::setIsSyncing(bool syncing) {
+    if (isSyncing_ == syncing) {
+        return;
+    }
+
+    isSyncing_ = syncing;
+    syncProgress_ = 0;
+
+    emit isSyncingChanged(syncing);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The sync progress ratio
+//****************************************************************************************************************************************************
+float User::syncProgress() const {
+    return syncProgress_;
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] progress The progress ratio.
+//****************************************************************************************************************************************************
+void User::setSyncProgress(float progress) {
+    // In some cases, we may have missed the syncStarted event because it was sent by bridge before the userChanged event,
+    // so we force the state to 'syncing' (GODT-2932).
+    this->setIsSyncing(true);
+
+    if (qAbs(syncProgress_ - progress) < 0.00001) {
+        return;
+    }
+
+    syncProgress_ = progress;
+    emit syncProgressChanged(progress);
+}
+
+
+//****************************************************************************************************************************************************
 /// \param[in] state The user state.
 /// \return A string describing the state.
 //****************************************************************************************************************************************************
@@ -300,6 +355,22 @@ QString User::stateToString(UserState state) {
     default:
         return "Unknown";
     }
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] durationMSecs The duration of the period in milliseconds.
+//****************************************************************************************************************************************************
+void User::startNotificationCooldownPeriod(User::ENotification notification, qint64 durationMSecs) {
+    notificationCooldownList_[notification] = QDateTime::currentDateTime().addMSecs(durationMSecs);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return true iff the notification is currently in a cooldown period.
+//****************************************************************************************************************************************************
+bool User::isNotificationInCooldown(User::ENotification notification) const {
+    return notificationCooldownList_.contains(notification) && (QDateTime::currentDateTime() < notificationCooldownList_[notification]);
 }
 
 

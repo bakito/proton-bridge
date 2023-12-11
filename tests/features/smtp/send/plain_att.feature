@@ -2,9 +2,11 @@ Feature: SMTP sending of plain messages
   Background:
     Given there exists an account with username "[user:user]" and password "password"
     And there exists an account with username "[user:to]" and password "password"
-    And bridge starts
+    Then it succeeds
+    When bridge starts
     And the user logs in with username "[user:user]" and password "password"
     And user "[user:user]" connects and authenticates SMTP client "1"
+    Then it succeeds
 
   Scenario: Basic message with attachment to internal account
     When SMTP client "1" sends the following message from "[user:user]@[domain]" to "[user:to]@[domain]":
@@ -186,6 +188,37 @@ Feature: SMTP sending of plain messages
               "Name": "External Bridge 2"
             }
           ],
+          "BCCList": [],
+          "MIMEType": "text/plain"
+        }
+      }
+      """
+
+  Scenario: Basic message with multiple different attachments to internal account
+    When there exists an account with username "bridgetest" and password "password"
+    And the user logs in with username "bridgetest" and password "password"
+    And user "bridgetest" connects and authenticates SMTP client "1"
+    And SMTP client "1" sends the following EML "plain/text_plain_multiple_attachments.eml" from "bridgetest@proton.local" to "internalbridgetest@proton.local"
+    Then it succeeds
+    When user "bridgetest" connects and authenticates IMAP client "1"
+    Then IMAP client "1" eventually sees the following messages in "Sent":
+      | from                    | to                              | subject                                   |
+      | bridgetest@proton.local | internalbridgetest@proton.local | Plain with multiple different attachments |
+    And the body in the "POST" request to "/mail/v4/messages" is:
+      """
+      {
+        "Message": {
+          "Subject": "Plain with multiple different attachments",
+          "Sender": {
+            "Name": "Bridge Test"
+          },
+          "ToList": [
+            {
+              "Address": "internalbridgetest@proton.local",
+              "Name": "Internal Bridge"
+            }
+          ],
+          "CCList": [],
           "BCCList": [],
           "MIMEType": "text/plain"
         }

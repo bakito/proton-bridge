@@ -38,7 +38,7 @@ func TestUser_New(t *testing.T) {
 	require.Empty(t, s.GetUserIDs())
 
 	// Create a new user.
-	user, err := s.AddUser("userID", "username", "authUID", "authRef", []byte("keyPass"))
+	user, err := s.AddUser("userID", "username", "username@pm.me", "authUID", "authRef", []byte("keyPass"))
 	require.NoError(t, err)
 
 	// The user should be listed in the store.
@@ -47,6 +47,7 @@ func TestUser_New(t *testing.T) {
 	// Check the user's default user information.
 	require.Equal(t, "userID", user.UserID())
 	require.Equal(t, "username", user.Username())
+	require.Equal(t, "username@pm.me", user.PrimaryEmail())
 
 	// Check the user's default auth information.
 	require.Equal(t, "authUID", user.AuthUID())
@@ -67,7 +68,7 @@ func TestUser_Clear(t *testing.T) {
 	s := newVault(t)
 
 	// Create a new user.
-	user, err := s.AddUser("userID", "username", "authUID", "authRef", []byte("keyPass"))
+	user, err := s.AddUser("userID", "username", "username@pm.me", "authUID", "authRef", []byte("keyPass"))
 	require.NoError(t, err)
 
 	// Check the user's default auth information.
@@ -92,7 +93,7 @@ func TestUser_Delete(t *testing.T) {
 	require.Empty(t, s.GetUserIDs())
 
 	// Create a new user.
-	user, err := s.AddUser("userID", "username", "authUID", "authRef", []byte("keyPass"))
+	user, err := s.AddUser("userID", "username", "username@pm.me", "authUID", "authRef", []byte("keyPass"))
 	require.NoError(t, err)
 
 	// The user should be listed in the store.
@@ -117,7 +118,7 @@ func TestUser_SyncStatus(t *testing.T) {
 	s := newVault(t)
 
 	// Create a new user.
-	user, err := s.AddUser("userID", "username", "authUID", "authRef", []byte("keyPass"))
+	user, err := s.AddUser("userID", "username", "username@pm.me", "authUID", "authRef", []byte("keyPass"))
 	require.NoError(t, err)
 
 	// Check the user's initial sync status.
@@ -136,7 +137,7 @@ func TestUser_SyncStatus(t *testing.T) {
 	require.True(t, user.SyncStatus().HasMessages)
 
 	// Clear the sync status.
-	require.NoError(t, user.ClearSyncStatus())
+	require.NoError(t, user.ClearSyncStatusDeprecated())
 
 	// Check the user's cleared sync status.
 	require.False(t, user.SyncStatus().HasLabels)
@@ -144,14 +145,55 @@ func TestUser_SyncStatus(t *testing.T) {
 	require.Empty(t, user.SyncStatus().LastMessageID)
 }
 
+func TestUser_ClearSyncStatusWithoutEventID(t *testing.T) {
+	// Create a new test vault.
+	s := newVault(t)
+
+	// Create a new user.
+	user, err := s.AddUser("userID", "username", "username@pm.me", "authUID", "authRef", []byte("keyPass"))
+	require.NoError(t, err)
+
+	// Simulate finishing the sync.
+	require.NoError(t, user.SetHasLabels(true))
+	require.NoError(t, user.SetHasMessages(true))
+	require.True(t, user.SyncStatus().HasLabels)
+	require.True(t, user.SyncStatus().HasMessages)
+	require.NoError(t, user.SetEventID("foo"))
+
+	// Clear the sync status.
+	require.NoError(t, user.ClearSyncStatusWithoutEventID())
+
+	// Check the user's cleared sync status.
+	require.False(t, user.SyncStatus().HasLabels)
+	require.False(t, user.SyncStatus().HasMessages)
+	require.Empty(t, user.SyncStatus().LastMessageID)
+	require.Equal(t, "foo", user.EventID())
+}
+
+func TestUser_PrimaryEmail(t *testing.T) {
+	// Create a new test vault.
+	s := newVault(t)
+
+	// Create a user.
+	user, err := s.AddUser("userID", "username", "username@pm.me", "authUID", "authRef", []byte("keyPass"))
+	require.NoError(t, err)
+
+	// Check that we can successfully modify a primary email
+	require.Equal(t, user.PrimaryEmail(), "username@pm.me")
+	require.NoError(t, user.SetPrimaryEmail("newname@pm.me"))
+	require.Equal(t, user.PrimaryEmail(), "newname@pm.me")
+	require.NoError(t, user.SetPrimaryEmail(""))
+	require.Equal(t, user.PrimaryEmail(), "")
+}
+
 func TestUser_ForEach(t *testing.T) {
 	// Create a new test vault.
 	s := newVault(t)
 
 	// Create some new users.
-	user1, err := s.AddUser("userID1", "username1", "authUID1", "authRef1", []byte("keyPass1"))
+	user1, err := s.AddUser("userID1", "username1", "username1@pm.me", "authUID1", "authRef1", []byte("keyPass1"))
 	require.NoError(t, err)
-	user2, err := s.AddUser("userID2", "username2", "authUID2", "authRef2", []byte("keyPass2"))
+	user2, err := s.AddUser("userID2", "username2", "username2@pm.me", "authUID2", "authRef2", []byte("keyPass2"))
 	require.NoError(t, err)
 
 	// Iterate through the users.
@@ -159,12 +201,14 @@ func TestUser_ForEach(t *testing.T) {
 		switch user.UserID() {
 		case "userID1":
 			require.Equal(t, "username1", user.Username())
+			require.Equal(t, "username1@pm.me", user.PrimaryEmail())
 			require.Equal(t, "authUID1", user.AuthUID())
 			require.Equal(t, "authRef1", user.AuthRef())
 			require.Equal(t, "keyPass1", string(user.KeyPass()))
 
 		case "userID2":
 			require.Equal(t, "username2", user.Username())
+			require.Equal(t, "username2@pm.me", user.PrimaryEmail())
 			require.Equal(t, "authUID2", user.AuthUID())
 			require.Equal(t, "authRef2", user.AuthRef())
 			require.Equal(t, "keyPass2", string(user.KeyPass()))

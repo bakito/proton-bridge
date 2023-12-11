@@ -14,14 +14,16 @@ Feature: Bridge can fully sync an account
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
-    And bridge starts
+    Then it succeeds
+    When bridge starts
+    Then it succeeds
 
   Scenario: The account is synced when the user logs in and persists across bridge restarts
     When the user logs in with username "[user:user]" and password "password"
     Then bridge sends sync started and finished events for user "[user:user]"
     When bridge restarts
     And user "[user:user]" connects and authenticates IMAP client "1"
-    Then IMAP client "1" sees the following mailbox info:
+    Then IMAP client "1" eventually sees the following mailbox info:
       | name         | total | unread |
       | INBOX        | 0     | 0      |
       | Drafts       | 0     | 0      |

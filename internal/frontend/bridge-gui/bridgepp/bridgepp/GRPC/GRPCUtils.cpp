@@ -47,22 +47,6 @@ QString grpcClientConfigBaseFilename() {
 }
 
 
-//****************************************************************************************************************************************************
-/// \return The server certificate file name
-//****************************************************************************************************************************************************
-QString serverCertificateFilename() {
-    return "cert.pem";
-}
-
-
-//****************************************************************************************************************************************************
-//
-//****************************************************************************************************************************************************
-QString serverKeyFilename() {
-    return "key.pem";
-}
-
-
 } // anonymous namespace
 
 
@@ -75,45 +59,31 @@ bool useFileSocketForGRPC() {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] configDir The folder containing the configuration files.
 /// \return The absolute path of the service config path.
 //****************************************************************************************************************************************************
-QString grpcServerConfigPath() {
-    return QDir(userConfigDir()).absoluteFilePath(grpcServerConfigFilename());
+QString grpcServerConfigPath(QString const &configDir) {
+    return QDir(configDir).absoluteFilePath(grpcServerConfigFilename());
 }
 
 
 //****************************************************************************************************************************************************
 /// \return The absolute path of the service config path.
 //****************************************************************************************************************************************************
-QString grpcClientConfigBasePath() {
-    return QDir(userConfigDir()).absoluteFilePath(grpcClientConfigBaseFilename());
-}
-
-
-//****************************************************************************************************************************************************
-/// \return The absolute path of the server certificate.
-//****************************************************************************************************************************************************
-QString serverCertificatePath() {
-    return QDir(userConfigDir()).absoluteFilePath(serverCertificateFilename());
-}
-
-
-//****************************************************************************************************************************************************
-/// \return The absolute path of the server key.
-//****************************************************************************************************************************************************
-QString serverKeyPath() {
-
-    return QDir(userConfigDir()).absoluteFilePath(serverKeyFilename());
+QString grpcClientConfigBasePath(QString const &configDir) {
+    return QDir(configDir).absoluteFilePath(grpcClientConfigBaseFilename());
 }
 
 
 //****************************************************************************************************************************************************
 /// \param[in] token The token to put in the file.
+/// \param[out] outError if the function returns an empty string and this pointer is not null, the pointer variable holds a description of the error
+/// on exit.
 /// \return The path of the created file.
-/// \return A null string if the file could not be saved..
+/// \return A null string if the file could not be saved.
 //****************************************************************************************************************************************************
-QString createClientConfigFile(QString const &token) {
-    QString const basePath = grpcClientConfigBasePath();
+QString createClientConfigFile(QString const &configDir, QString const &token, QString *outError) {
+    QString const basePath = grpcClientConfigBasePath(configDir);
     QString path, error;
     for (qint32 i = 0; i < 1000; ++i) // we try a decent amount of times
     {
@@ -121,13 +91,16 @@ QString createClientConfigFile(QString const &token) {
         if (!QFileInfo(path).exists()) {
             GRPCConfig config;
             config.token = token;
-            if (!config.save(path)) {
+
+            if (!config.save(path, outError)) {
                 return QString();
             }
             return path;
         }
     }
 
+    if (outError)
+        *outError = "no usable client configuration file name could be found.";
     return QString();
 }
 

@@ -19,6 +19,8 @@
 #include "AppController.h"
 #include "QMLBackend.h"
 #include "SentryUtils.h"
+#include "Settings.h"
+#include <bridgepp/CLI/CLIUtils.h>
 #include <bridgepp/GRPC/GRPCClient.h>
 #include <bridgepp/Exception/Exception.h>
 #include <bridgepp/ProcessMonitor.h>
@@ -27,6 +29,10 @@
 
 
 using namespace bridgepp;
+
+namespace {
+QString const noWindowFlag = "--no-window"; ///< The no-window command-line flag.
+}
 
 
 //****************************************************************************************************************************************************
@@ -44,8 +50,17 @@ AppController &app() {
 AppController::AppController()
     : backend_(std::make_unique<QMLBackend>())
     , grpc_(std::make_unique<GRPCClient>())
-    , log_(std::make_unique<Log>()) {
+    , log_(std::make_unique<Log>())
+    , settings_(new Settings) {
 }
+
+
+
+//****************************************************************************************************************************************************
+// The following is in the implementation file because of unique pointers with incomplete types in headers.
+// See https://stackoverflow.com/questions/6012157/is-stdunique-ptrt-required-to-know-the-full-definition-of-t
+//****************************************************************************************************************************************************
+AppController::~AppController() = default;
 
 
 //****************************************************************************************************************************************************
@@ -68,13 +83,66 @@ ProcessMonitor *AppController::bridgeMonitor() const {
 
 
 //****************************************************************************************************************************************************
-/// \param[in] function The function that caught the exception.
-/// \param[in] message The error message.
+/// \return A reference to the application settings.
 //****************************************************************************************************************************************************
-void AppController::onFatalError(QString const &function, QString const &message) {
-    QString const fullMessage = QString("%1(): %2").arg(function, message);
-    reportSentryException(SENTRY_LEVEL_ERROR, "AppController got notified of a fatal error", "Exception", fullMessage.toLocal8Bit());
-    QMessageBox::critical(nullptr, tr("Error"), message);
-    log().fatal(fullMessage);
+Settings &AppController::settings() {
+    return *settings_;
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] exception The exception that triggered the fatal error.
+//****************************************************************************************************************************************************
+void AppController::onFatalError(Exception const &exception) {
+    sentry_uuid_t uuid = reportSentryException("AppController got notified of a fatal error", exception);
+
+    QMessageBox::critical(nullptr, tr("Error"), exception.what());
+    restart(true);
+    log().fatal(QString("reportID: %1 Captured exception: %2").arg(QByteArray(uuid.bytes, 16).toHex(), exception.detailedWhat()));
     qApp->exit(EXIT_FAILURE);
+}
+
+//****************************************************************************************************************************************************
+/// \param[in] isCrashing Is the restart triggered by a crash.
+//****************************************************************************************************************************************************
+void AppController::restart(bool isCrashing) {
+    if (launcher_.isEmpty()) {
+        return;
+    }
+
+    QProcess p;
+    QStringList args = stripStringParameterFromCommandLine("--session-id", launcherArgs_);
+    if (isCrashing) {
+        args.append(noWindowFlag);
+    }
+
+    log_->info(QString("Restarting - App : %1 - Args : %2").arg(launcher_, args.join(" ")));
+    p.startDetached(launcher_, args);
+    p.waitForStarted();
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] launcher The launcher.
+/// \param[in] args The launcher arguments.
+//****************************************************************************************************************************************************
+void AppController::setLauncherArgs(const QString &launcher, const QStringList &args) {
+    launcher_ = launcher;
+    launcherArgs_ = args;
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] sessionID The sessionID.
+//****************************************************************************************************************************************************
+void AppController::setSessionID(const QString &sessionID) {
+    sessionID_ = sessionID;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The sessionID.
+//****************************************************************************************************************************************************
+QString AppController::sessionID() {
+    return sessionID_;
 }

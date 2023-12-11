@@ -41,19 +41,19 @@ public: // member functions.
     bool isStreaming() const; ///< Check if the service is currently streaming events.
     grpc::Status CheckTokens(::grpc::ServerContext *context, ::google::protobuf::StringValue const *request, ::google::protobuf::StringValue *response) override;
     grpc::Status AddLogEntry(::grpc::ServerContext *, ::grpc::AddLogEntryRequest const *request, ::google::protobuf::Empty *) override;
-    grpc::Status GuiReady(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::Empty *) override;
+    grpc::Status GuiReady(::grpc::ServerContext *, ::google::protobuf::Empty const *, grpc::GuiReadyResponse *response) override;
     grpc::Status Quit(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::Empty *) override;
     grpc::Status Restart(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::Empty *) override;
     grpc::Status ShowOnStartup(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::BoolValue *response) override;
-    grpc::Status ShowSplashScreen(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::BoolValue *response) override;
-    grpc::Status IsFirstGuiStart(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::BoolValue *response) override;
     grpc::Status SetIsAutostartOn(::grpc::ServerContext *, ::google::protobuf::BoolValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status IsAutostartOn(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::BoolValue *response) override;
     grpc::Status SetIsBetaEnabled(::grpc::ServerContext *, ::google::protobuf::BoolValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status IsBetaEnabled(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::BoolValue *response) override;
     grpc::Status SetIsAllMailVisible(::grpc::ServerContext *context, ::google::protobuf::BoolValue const *request, ::google::protobuf::Empty *response) override;
     grpc::Status IsAllMailVisible(::grpc::ServerContext *context, ::google::protobuf::Empty const *request, ::google::protobuf::BoolValue *response) override;
-    grpc::Status GoOs(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::StringValue *response) override;
+    grpc::Status SetIsTelemetryDisabled(::grpc::ServerContext *, ::google::protobuf::BoolValue const *request, ::google::protobuf::Empty *response) override;
+    grpc::Status IsTelemetryDisabled(::grpc::ServerContext *, ::google::protobuf::Empty const *request, ::google::protobuf::BoolValue *response) override;
+    grpc::Status GoOs(::grpc::ServerContext *, ::google::protobuf::Empty const*, ::google::protobuf::StringValue *response) override;
     grpc::Status TriggerReset(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::Empty *) override;
     grpc::Status Version(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::StringValue *response) override;
     grpc::Status LogsPath(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::StringValue *response) override;
@@ -65,7 +65,6 @@ public: // member functions.
     grpc::Status ColorSchemeName(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::StringValue *response) override;
     grpc::Status CurrentEmailClient(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::StringValue *response) override;
     grpc::Status ReportBug(::grpc::ServerContext *, ::grpc::ReportBugRequest const *request, ::google::protobuf::Empty *) override;
-    grpc::Status ExportTLSCertificates(::grpc::ServerContext *context, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *response) override;
     grpc::Status ForceLauncher(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status SetMainExecutable(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status Login(::grpc::ServerContext *, ::grpc::LoginRequest const *request, ::google::protobuf::Empty *) override;
@@ -90,12 +89,18 @@ public: // member functions.
     grpc::Status GetUserList(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::grpc::UserListResponse *response) override;
     grpc::Status GetUser(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::grpc::User *response) override;
     grpc::Status SetUserSplitMode(::grpc::ServerContext *, ::grpc::UserSplitModeRequest const *request, ::google::protobuf::Empty *) override;
+    grpc::Status SendBadEventUserFeedback(::grpc::ServerContext *context, ::grpc::UserBadEventFeedbackRequest const *request, ::google::protobuf::Empty *response) override;
     grpc::Status LogoutUser(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status RemoveUser(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status ConfigureUserAppleMail(::grpc::ServerContext *, ::grpc::ConfigureAppleMailRequest const *request, ::google::protobuf::Empty *) override;
-    grpc::Status RunEventStream(::grpc::ServerContext *, ::grpc::EventStreamRequest const *request, ::grpc::ServerWriter<::grpc::StreamEvent> *writer) override;
+    grpc::Status IsTLSCertificateInstalled(::grpc::ServerContext *, ::google::protobuf::Empty const*, ::google::protobuf::BoolValue *response) override;
+    grpc::Status InstallTLSCertificate(::grpc::ServerContext *, ::google::protobuf::Empty const*, ::google::protobuf::Empty *) override;
+    grpc::Status ExportTLSCertificates(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
+    grpc::Status ReportBugClicked(::grpc::ServerContext *context, ::google::protobuf::Empty const *request, ::google::protobuf::Empty *) override;
+    grpc::Status AutoconfigClicked(::grpc::ServerContext *context, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
+    grpc::Status ExternalLinkClicked(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
+    grpc::Status RunEventStream(::grpc::ServerContext *ctx, ::grpc::EventStreamRequest const *request, ::grpc::ServerWriter<::grpc::StreamEvent> *writer) override;
     grpc::Status StopEventStream(::grpc::ServerContext *, ::google::protobuf::Empty const *, ::google::protobuf::Empty *) override;
-
     bool sendEvent(bridgepp::SPStreamEvent const &event); ///< Queue an event for sending through the event stream.
 
 private: // member functions

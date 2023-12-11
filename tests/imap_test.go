@@ -19,6 +19,8 @@ package tests
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -38,35 +40,35 @@ import (
 )
 
 func (s *scenario) userConnectsIMAPClient(username, clientID string) error {
-	return s.t.newIMAPClient(s.t.getUserID(username), clientID)
+	return s.t.newIMAPClient(s.t.getUserByName(username).getUserID(), clientID)
 }
 
 func (s *scenario) userConnectsIMAPClientOnPort(username, clientID string, port int) error {
-	return s.t.newIMAPClientOnPort(s.t.getUserID(username), clientID, port)
+	return s.t.newIMAPClientOnPort(s.t.getUserByName(username).getUserID(), clientID, port)
 }
 
 func (s *scenario) userConnectsAndAuthenticatesIMAPClient(username, clientID string) error {
-	return s.userConnectsAndAuthenticatesIMAPClientWithAddress(username, clientID, s.t.getUserAddrs(s.t.getUserID(username))[0])
+	return s.userConnectsAndAuthenticatesIMAPClientWithAddress(username, clientID, s.t.getUserByName(username).getEmails()[0])
 }
 
 func (s *scenario) userConnectsAndAuthenticatesIMAPClientWithAddress(username, clientID, address string) error {
-	if err := s.t.newIMAPClient(s.t.getUserID(username), clientID); err != nil {
+	if err := s.t.newIMAPClient(s.t.getUserByName(username).getUserID(), clientID); err != nil {
 		return err
 	}
 
 	userID, client := s.t.getIMAPClient(clientID)
 
-	return client.Login(address, s.t.getUserBridgePass(userID))
+	return client.Login(address, s.t.getUserByID(userID).getBridgePass())
 }
 
 func (s *scenario) userConnectsAndCanNotAuthenticateIMAPClientWithAddress(username, clientID, address string) error {
-	if err := s.t.newIMAPClient(s.t.getUserID(username), clientID); err != nil {
+	if err := s.t.newIMAPClient(s.t.getUserByName(username).getUserID(), clientID); err != nil {
 		return err
 	}
 
 	userID, client := s.t.getIMAPClient(clientID)
 
-	if err := client.Login(address, s.t.getUserBridgePass(userID)); err == nil {
+	if err := client.Login(address, s.t.getUserByID(userID).getBridgePass()); err == nil {
 		return fmt.Errorf("expected error, got nil")
 	}
 
@@ -76,19 +78,19 @@ func (s *scenario) userConnectsAndCanNotAuthenticateIMAPClientWithAddress(userna
 func (s *scenario) imapClientCanAuthenticate(clientID string) error {
 	userID, client := s.t.getIMAPClient(clientID)
 
-	return client.Login(s.t.getUserAddrs(userID)[0], s.t.getUserBridgePass(userID))
+	return client.Login(s.t.getUserByID(userID).getEmails()[0], s.t.getUserByID(userID).getBridgePass())
 }
 
 func (s *scenario) imapClientCanAuthenticateWithAddress(clientID string, address string) error {
 	userID, client := s.t.getIMAPClient(clientID)
 
-	return client.Login(address, s.t.getUserBridgePass(userID))
+	return client.Login(address, s.t.getUserByID(userID).getBridgePass())
 }
 
 func (s *scenario) imapClientCannotAuthenticate(clientID string) error {
 	userID, client := s.t.getIMAPClient(clientID)
 
-	if err := client.Login(s.t.getUserAddrs(userID)[0], s.t.getUserBridgePass(userID)); err == nil {
+	if err := client.Login(s.t.getUserByID(userID).getEmails()[0], s.t.getUserByID(userID).getBridgePass()); err == nil {
 		return fmt.Errorf("expected error, got nil")
 	}
 
@@ -98,7 +100,7 @@ func (s *scenario) imapClientCannotAuthenticate(clientID string) error {
 func (s *scenario) imapClientCannotAuthenticateWithAddress(clientID, address string) error {
 	userID, client := s.t.getIMAPClient(clientID)
 
-	if err := client.Login(address, s.t.getUserBridgePass(userID)); err == nil {
+	if err := client.Login(address, s.t.getUserByID(userID).getBridgePass()); err == nil {
 		return fmt.Errorf("expected error, got nil")
 	}
 
@@ -108,7 +110,7 @@ func (s *scenario) imapClientCannotAuthenticateWithAddress(clientID, address str
 func (s *scenario) imapClientCannotAuthenticateWithIncorrectUsername(clientID string) error {
 	userID, client := s.t.getIMAPClient(clientID)
 
-	if err := client.Login(s.t.getUserAddrs(userID)[0]+"bad", s.t.getUserBridgePass(userID)); err == nil {
+	if err := client.Login(s.t.getUserByID(userID).getEmails()[0]+"bad", s.t.getUserByID(userID).getBridgePass()); err == nil {
 		return fmt.Errorf("expected error, got nil")
 	}
 
@@ -117,11 +119,20 @@ func (s *scenario) imapClientCannotAuthenticateWithIncorrectUsername(clientID st
 
 func (s *scenario) imapClientCannotAuthenticateWithIncorrectPassword(clientID string) error {
 	userID, client := s.t.getIMAPClient(clientID)
-
-	if err := client.Login(s.t.getUserAddrs(userID)[0], s.t.getUserBridgePass(userID)+"bad"); err == nil {
+	badPass := base64.StdEncoding.EncodeToString([]byte("bad_password"))
+	if err := client.Login(s.t.getUserByID(userID).getEmails()[0], badPass); err == nil {
 		return fmt.Errorf("expected error, got nil")
 	}
 
+	return nil
+}
+
+func (s *scenario) imapClientCloses(clientID string) error {
+	_, client := s.t.getIMAPClient(clientID)
+	if err := client.Logout(); err != nil {
+		return err
+	}
+	delete(s.t.imapClients, clientID)
 	return nil
 }
 
@@ -297,7 +308,6 @@ func (s *scenario) imapClientSeesTheFollowingMessagesInMailbox(clientID, mailbox
 	if err != nil {
 		return err
 	}
-
 	return matchMessages(haveMessages, wantMessages)
 }
 
@@ -331,6 +341,26 @@ func (s *scenario) imapClientEventuallySeesTheFollowingMessagesInMailbox(clientI
 		err := s.imapClientSeesTheFollowingMessagesInMailbox(clientID, mailbox, table)
 		logrus.WithError(err).Trace("Matching eventually")
 		return err
+	})
+}
+
+func (s *scenario) imapClientSeesMessageInMailboxWithStructure(clientID, mailbox string, message *godog.DocString) error {
+	return eventually(func() error {
+		_, client := s.t.getIMAPClient(clientID)
+
+		var msgStruct MessageStruct
+		if err := json.Unmarshal([]byte(message.Content), &msgStruct); err != nil {
+			return err
+		}
+
+		fetch, err := clientFetch(client, mailbox)
+		if err != nil {
+			return err
+		}
+
+		haveMessages := xslices.Map(fetch, newMessageStructFromIMAP)
+
+		return matchStructure(haveMessages, msgStruct)
 	})
 }
 
@@ -402,23 +432,96 @@ func (s *scenario) imapClientMarksAllMessagesAsDeleted(clientID string) error {
 	return nil
 }
 
-func (s *scenario) imapClientSeesThatMessageHasTheFlag(clientID string, seq int, flag string) error {
+func (s *scenario) imapClientMarksMessageAsState(clientID string, seq int, messageState string) error {
 	_, client := s.t.getIMAPClient(clientID)
 
-	fetch, err := clientFetch(client, client.Mailbox().Name)
+	err := clientChangeMessageState(client, seq, messageState, true)
+	if err != nil {
+		s.t.pushError(err)
+	}
+
+	return nil
+}
+
+func (s *scenario) imapClientMarksTheMessageWithSubjectAsState(clientID, subject, messageState string) error {
+	_, client := s.t.getIMAPClient(clientID)
+
+	uid, err := clientGetUIDBySubject(client, client.Mailbox().Name, subject)
 	if err != nil {
 		return err
 	}
 
-	idx := xslices.IndexFunc(fetch, func(msg *imap.Message) bool {
-		return msg.SeqNum == uint32(seq)
-	})
-
-	if !slices.Contains(fetch[idx].Flags, flag) {
-		return fmt.Errorf("expected message %v to have flag %v, got %v", seq, flag, fetch[idx].Flags)
+	if err := clientChangeMessageState(client, int(uid), messageState, true); err != nil {
+		s.t.pushError(err)
 	}
 
 	return nil
+}
+
+func (s *scenario) imapClientMarksAllMessagesAsState(clientID, messageState string) error {
+	_, client := s.t.getIMAPClient(clientID)
+
+	if err := clientChangeAllMessageState(client, messageState); err != nil {
+		s.t.pushError(err)
+	}
+
+	return nil
+}
+
+func (s *scenario) imapClientEventuallySeesThatMessageHasTheFlag(clientID string, seq int, flag string) error {
+	return eventually(func() error {
+		_, client := s.t.getIMAPClient(clientID)
+
+		return clientIsFlagApplied(client, seq, flag, true, false)
+	})
+}
+
+func (s *scenario) imapClientSeesThatMessageDoesNotHaveTheFlag(clientID string, seq int, flag string) error {
+	_, client := s.t.getIMAPClient(clientID)
+
+	return clientIsFlagApplied(client, seq, flag, false, false)
+}
+
+func (s *scenario) imapClientEventuallySeesThatTheMessageWithSubjectHasTheFlag(clientID, subject, flag string) error {
+	return eventually(func() error {
+		_, client := s.t.getIMAPClient(clientID)
+
+		uid, err := clientGetUIDBySubject(client, client.Mailbox().Name, subject)
+		if err != nil {
+			return err
+		}
+
+		return clientIsFlagApplied(client, int(uid), flag, true, false)
+	})
+}
+
+func (s *scenario) imapClientEventuallySeesThatTheMessageWithSubjectDoesNotHaveTheFlag(clientID, subject, flag string) error {
+	return eventually(func() error {
+		_, client := s.t.getIMAPClient(clientID)
+
+		uid, err := clientGetUIDBySubject(client, client.Mailbox().Name, subject)
+		if err != nil {
+			return err
+		}
+
+		return clientIsFlagApplied(client, int(uid), flag, false, false)
+	})
+}
+
+func (s *scenario) imapClientEventuallySeesThatAllTheMessagesHaveTheFlag(clientID string, flag string) error {
+	return eventually(func() error {
+		_, client := s.t.getIMAPClient(clientID)
+
+		return clientIsFlagApplied(client, 1, flag, true, true)
+	})
+}
+
+func (s *scenario) imapClientEventuallySeesThatAllTheMessagesDoNotHaveTheFlag(clientID string, flag string) error {
+	return eventually(func() error {
+		_, client := s.t.getIMAPClient(clientID)
+
+		return clientIsFlagApplied(client, 1, flag, false, true)
+	})
 }
 
 func (s *scenario) imapClientExpunges(clientID string) error {
@@ -447,6 +550,13 @@ func (s *scenario) imapClientAppendsTheFollowingMessagesToMailbox(clientID strin
 		return err
 	}
 
+	for idx, message := range messages {
+		if len(message.Date) == 0 {
+			logrus.Warnf("Appended message has no date, adding default one so it does not fail test")
+		}
+		messages[idx].Date = "23 Feb 80 00:00 GMT"
+	}
+
 	for _, message := range messages {
 		if err := clientAppend(client, mailbox, string(message.Build())); err != nil {
 			s.t.pushError(err)
@@ -471,7 +581,7 @@ func (s *scenario) imapClientAppendsToMailbox(clientID string, file, mailbox str
 	return nil
 }
 
-func (s *scenario) imapClientsMoveMessageWithSubjectUserFromToByOrderedOperations(sourceIMAPClient, targetIMAPClient, messageSubject, bddUserID, targetMailboxName, op1, op2, op3 string) error {
+func (s *scenario) imapClientsMoveMessageWithSubjectUserFromToByOrderedOperations(sourceIMAPClient, targetIMAPClient, messageSubject, _, targetMailboxName, op1, op2, op3 string) error {
 	// call NOOP to prevent unilateral updates in following FETCH
 	_, sourceClient := s.t.getIMAPClient(sourceIMAPClient)
 	_, targetClient := s.t.getIMAPClient(targetIMAPClient)
@@ -573,6 +683,14 @@ func (s *scenario) imapClientSeesHeaderInMessageWithSubject(clientID, headerStri
 	}
 
 	return fmt.Errorf("could not find message with given subject '%v'", subject)
+}
+
+func (s *scenario) imapClientDoesNotSeeHeaderInMessageWithSubject(clientID, headerString, subject, mailbox string) error {
+	err := s.imapClientSeesHeaderInMessageWithSubject(clientID, headerString, subject, mailbox)
+	if err == nil {
+		return fmt.Errorf("message header contains '%v'", headerString)
+	}
+	return nil
 }
 
 func clientList(client *client.Client) []*imap.MailboxInfo {
@@ -752,4 +870,103 @@ func clientStore(client *client.Client, from, to int, isUID bool, item imap.Stor
 
 func clientAppend(client *client.Client, mailbox string, literal string) error {
 	return client.Append(mailbox, []string{}, time.Now(), strings.NewReader(literal))
+}
+
+func clientIsFlagApplied(client *client.Client, seq int, flag string, applied bool, wholeMailbox bool) error {
+	fetch, err := clientFetch(client, client.Mailbox().Name)
+	if err != nil {
+		return err
+	}
+
+	idx := xslices.IndexFunc(fetch, func(msg *imap.Message) bool {
+		return msg.SeqNum == uint32(seq)
+	})
+
+	if slices.Contains(fetch[idx].Flags, flag) != applied {
+		return fmt.Errorf("expected message %v to have flag %v set to %v, got %v", seq, flag, applied, fetch[idx].Flags)
+	}
+
+	if wholeMailbox {
+		for i := seq; i <= int(client.Mailbox().Messages); i++ {
+			idx := xslices.IndexFunc(fetch, func(msg *imap.Message) bool {
+				return msg.SeqNum == uint32(i)
+			})
+
+			if slices.Contains(fetch[idx].Flags, flag) != applied {
+				return fmt.Errorf("expected message %v to have flag %v set to %v, got %v", seq, flag, applied, fetch[idx].Flags)
+			}
+		}
+	}
+
+	return nil
+}
+
+func clientChangeMessageState(client *client.Client, seq int, messageState string, isUID bool) error {
+	switch {
+	case messageState == "read":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.AddFlags, true), imap.SeenFlag)
+		if err != nil {
+			return err
+		}
+
+	case messageState == "unread":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.RemoveFlags, true), imap.SeenFlag)
+		if err != nil {
+			return err
+		}
+
+	case messageState == "starred":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.AddFlags, true), imap.FlaggedFlag)
+		if err != nil {
+			return err
+		}
+
+	case messageState == "unstarred":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.RemoveFlags, true), imap.FlaggedFlag)
+		if err != nil {
+			return err
+		}
+
+	case messageState == "forwarded":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.AddFlags, true), "Forwarded")
+		if err != nil {
+			return err
+		}
+
+	case messageState == "unforwarded":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.RemoveFlags, true), "Forwarded")
+		if err != nil {
+			return err
+		}
+
+	case messageState == "replied":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.AddFlags, true), imap.AnsweredFlag)
+		if err != nil {
+			return err
+		}
+
+	case messageState == "unreplied":
+		_, err := clientStore(client, seq, seq, isUID, imap.FormatFlagsOp(imap.RemoveFlags, true), imap.AnsweredFlag)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func clientChangeAllMessageState(client *client.Client, messageState string) error {
+	if messageState == "read" {
+		_, err := clientStore(client, 1, int(client.Mailbox().Messages), false, imap.FormatFlagsOp(imap.AddFlags, true), imap.SeenFlag)
+		if err != nil {
+			return err
+		}
+	} else if messageState == "unread" {
+		_, err := clientStore(client, 1, int(client.Mailbox().Messages), false, imap.FormatFlagsOp(imap.RemoveFlags, true), imap.SeenFlag)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

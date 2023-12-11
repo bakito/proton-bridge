@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/gluon/imap"
+	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/go-proton-api"
-	"github.com/ProtonMail/proton-bridge/v3/internal/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/logging"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/imapservice"
 	"github.com/ProtonMail/proton-bridge/v3/internal/try"
 	"github.com/ProtonMail/proton-bridge/v3/internal/user"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
@@ -43,6 +45,8 @@ const (
 	Locked
 	Connected
 )
+
+var ErrFailedToUnlock = errors.New("failed to unlock user keys")
 
 type UserInfo struct {
 	// UserID is the user's API ID.
@@ -64,10 +68,10 @@ type UserInfo struct {
 	BridgePass []byte
 
 	// UsedSpace is the amount of space used by the user.
-	UsedSpace int
+	UsedSpace uint64
 
 	// MaxSpace is the total amount of space available to the user.
-	MaxSpace int
+	MaxSpace uint64
 }
 
 // GetUserIDs returns the IDs of all known users (authorized or not).
@@ -94,7 +98,7 @@ func (bridge *Bridge) GetUserInfo(userID string) (UserInfo, error) {
 			if len(user.AuthUID()) == 0 {
 				state = SignedOut
 			}
-			info = getUserInfo(user.UserID(), user.Username(), state, user.AddressMode())
+			info = getUserInfo(user.UserID(), user.Username(), user.PrimaryEmail(), state, user.AddressMode())
 		}); err != nil {
 			return UserInfo{}, fmt.Errorf("failed to get user info: %w", err)
 		}
@@ -155,11 +159,15 @@ func (bridge *Bridge) LoginUser(
 		func() (string, error) {
 			return bridge.loginUser(ctx, client, auth.UID, auth.RefreshToken, keyPass)
 		},
-		func() error {
-			return client.AuthDelete(ctx)
-		},
 	)
+
 	if err != nil {
+		// Failure to unlock will allow retries, so we do not delete auth.
+		if !errors.Is(err, ErrFailedToUnlock) {
+			if deleteErr := client.AuthDelete(ctx); deleteErr != nil {
+				logrus.WithError(deleteErr).Error("Failed to delete auth")
+			}
+		}
 		return "", fmt.Errorf("failed to login user: %w", err)
 	}
 
@@ -215,7 +223,16 @@ func (bridge *Bridge) LoginFull(
 		keyPass = password
 	}
 
-	return bridge.LoginUser(ctx, client, auth, keyPass)
+	userID, err := bridge.LoginUser(ctx, client, auth, keyPass)
+	if err != nil {
+		if deleteErr := client.AuthDelete(ctx); deleteErr != nil {
+			logrus.WithError(err).Error("Failed to delete auth")
+		}
+
+		return "", err
+	}
+
+	return userID, nil
 }
 
 // LogoutUser logs out the given user.
@@ -228,7 +245,7 @@ func (bridge *Bridge) LogoutUser(ctx context.Context, userID string) error {
 			return ErrNoSuchUser
 		}
 
-		bridge.logoutUser(ctx, user, true, false)
+		bridge.logoutUser(ctx, user, true, false, false)
 
 		bridge.publish(events.UserLoggedOut{
 			UserID: userID,
@@ -242,13 +259,22 @@ func (bridge *Bridge) LogoutUser(ctx context.Context, userID string) error {
 func (bridge *Bridge) DeleteUser(ctx context.Context, userID string) error {
 	logrus.WithField("userID", userID).Info("Deleting user")
 
+	syncConfigDir, err := bridge.locator.ProvideIMAPSyncConfigPath()
+	if err != nil {
+		return fmt.Errorf("failed to get sync config path")
+	}
+
 	return safe.LockRet(func() error {
 		if !bridge.vault.HasUser(userID) {
 			return ErrNoSuchUser
 		}
 
 		if user, ok := bridge.users[userID]; ok {
-			bridge.logoutUser(ctx, user, true, true)
+			bridge.logoutUser(ctx, user, true, true, !bridge.GetTelemetryDisabled())
+		}
+
+		if err := imapservice.DeleteSyncState(syncConfigDir, userID); err != nil {
+			return fmt.Errorf("failed to delete use sync config")
 		}
 
 		if err := bridge.vault.DeleteUser(userID); err != nil {
@@ -277,21 +303,69 @@ func (bridge *Bridge) SetAddressMode(ctx context.Context, userID string, mode va
 			return fmt.Errorf("address mode is already %q", mode)
 		}
 
-		if err := bridge.removeIMAPUser(ctx, user, true); err != nil {
-			return fmt.Errorf("failed to remove IMAP user: %w", err)
-		}
-
 		if err := user.SetAddressMode(ctx, mode); err != nil {
 			return fmt.Errorf("failed to set address mode: %w", err)
-		}
-
-		if err := bridge.addIMAPUser(ctx, user); err != nil {
-			return fmt.Errorf("failed to add IMAP user: %w", err)
 		}
 
 		bridge.publish(events.AddressModeChanged{
 			UserID:      userID,
 			AddressMode: mode,
+		})
+
+		var splitMode = false
+		for _, user := range bridge.users {
+			if user.GetAddressMode() == vault.SplitMode {
+				splitMode = true
+				break
+			}
+		}
+		bridge.heartbeat.SetSplitMode(splitMode)
+
+		return nil
+	}, bridge.usersLock)
+}
+
+// SendBadEventUserFeedback passes the feedback to the given user.
+func (bridge *Bridge) SendBadEventUserFeedback(_ context.Context, userID string, doResync bool) error {
+	logrus.WithField("userID", userID).WithField("doResync", doResync).Info("Passing bad event feedback to user")
+
+	return safe.RLockRet(func() error {
+		ctx := context.Background()
+
+		user, ok := bridge.users[userID]
+		if !ok {
+			if rerr := bridge.reporter.ReportMessageWithContext(
+				"Failed to handle event: feedback failed: no such user",
+				reporter.Context{"user_id": userID},
+			); rerr != nil {
+				logrus.WithError(rerr).Error("Failed to report feedback failure")
+			}
+
+			return ErrNoSuchUser
+		}
+
+		if doResync {
+			if rerr := bridge.reporter.ReportMessageWithContext(
+				"Failed to handle event: feedback resync",
+				reporter.Context{"user_id": userID},
+			); rerr != nil {
+				logrus.WithError(rerr).Error("Failed to report feedback failure")
+			}
+
+			return user.BadEventFeedbackResync(ctx)
+		}
+
+		if rerr := bridge.reporter.ReportMessageWithContext(
+			"Failed to handle event: feedback logout",
+			reporter.Context{"user_id": userID},
+		); rerr != nil {
+			logrus.WithError(rerr).Error("Failed to report feedback failure")
+		}
+
+		bridge.logoutUser(ctx, user, true, false, false)
+
+		bridge.publish(events.UserLoggedOut{
+			UserID: userID,
 		})
 
 		return nil
@@ -315,9 +389,9 @@ func (bridge *Bridge) loginUser(ctx context.Context, client *proton.Client, auth
 	}
 
 	if userKR, err := apiUser.Keys.Unlock(saltedKeyPass, nil); err != nil {
-		return "", fmt.Errorf("failed to unlock user keys: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrFailedToUnlock, err)
 	} else if userKR.CountDecryptionEntities() == 0 {
-		return "", fmt.Errorf("failed to unlock user keys")
+		return "", ErrFailedToUnlock
 	}
 
 	if err := bridge.addUser(ctx, client, apiUser, authUID, authRef, saltedKeyPass, true); err != nil {
@@ -329,30 +403,37 @@ func (bridge *Bridge) loginUser(ctx context.Context, client *proton.Client, auth
 
 // loadUsers tries to load each user in the vault that isn't already loaded.
 func (bridge *Bridge) loadUsers(ctx context.Context) error {
+	logrus.WithField("count", len(bridge.vault.GetUserIDs())).Info("Loading users")
+	defer logrus.Info("Finished loading users")
+
 	return bridge.vault.ForUser(runtime.NumCPU(), func(user *vault.User) error {
+		log := logrus.WithField("userID", user.UserID())
+
 		if user.AuthUID() == "" {
+			log.Info("User is not connected (skipping)")
 			return nil
 		}
 
 		if safe.RLockRet(func() bool { return mapHas(bridge.users, user.UserID()) }, bridge.usersLock) {
+			log.Info("User is already loaded (skipping)")
 			return nil
 		}
 
-		logrus.WithField("userID", user.UserID()).Info("Loading connected user")
+		log.WithField("mode", user.AddressMode()).Info("Loading connected user")
 
 		bridge.publish(events.UserLoading{
 			UserID: user.UserID(),
 		})
 
 		if err := bridge.loadUser(ctx, user); err != nil {
-			logrus.WithError(err).Error("Failed to load connected user")
+			log.WithError(err).Error("Failed to load connected user")
 
 			bridge.publish(events.UserLoadFail{
 				UserID: user.UserID(),
 				Error:  err,
 			})
 		} else {
-			logrus.WithField("userID", user.UserID()).Info("Successfully loaded user")
+			log.Info("Successfully loaded connected user")
 
 			bridge.publish(events.UserLoadSuccess{
 				UserID: user.UserID(),
@@ -367,12 +448,13 @@ func (bridge *Bridge) loadUsers(ctx context.Context) error {
 func (bridge *Bridge) loadUser(ctx context.Context, user *vault.User) error {
 	client, auth, err := bridge.api.NewClientWithRefresh(ctx, user.AuthUID(), user.AuthRef())
 	if err != nil {
-		if apiErr := new(proton.Error); errors.As(err, &apiErr) && (apiErr.Code == proton.AuthRefreshTokenInvalid) {
+		if apiErr := new(proton.APIError); errors.As(err, &apiErr) && (apiErr.Code == proton.AuthRefreshTokenInvalid) {
 			// The session cannot be refreshed, we sign out the user by clearing his auth secrets.
 			if err := user.Clear(); err != nil {
 				logrus.WithError(err).Warn("Failed to clear user secrets")
 			}
 		}
+
 		return fmt.Errorf("failed to create API client: %w", err)
 	}
 
@@ -387,6 +469,12 @@ func (bridge *Bridge) loadUser(ctx context.Context, user *vault.User) error {
 
 	if err := bridge.addUser(ctx, client, apiUser, auth.UID, auth.RefreshToken, user.KeyPass(), false); err != nil {
 		return fmt.Errorf("failed to add user: %w", err)
+	}
+
+	if user.PrimaryEmail() != apiUser.Email {
+		if err := user.SetPrimaryEmail(apiUser.Email); err != nil {
+			return fmt.Errorf("failed to modify user primary email: %w", err)
+		}
 	}
 
 	return nil
@@ -406,7 +494,7 @@ func (bridge *Bridge) addUser(
 		return fmt.Errorf("failed to add vault user: %w", err)
 	}
 
-	if err := bridge.addUserWithVault(ctx, client, apiUser, vaultUser); err != nil {
+	if err := bridge.addUserWithVault(ctx, client, apiUser, vaultUser, isNew); err != nil {
 		if _, ok := err.(*resty.ResponseError); ok || isLogin {
 			logrus.WithError(err).Error("Failed to add user, clearing its secrets from vault")
 
@@ -441,24 +529,38 @@ func (bridge *Bridge) addUserWithVault(
 	client *proton.Client,
 	apiUser proton.User,
 	vault *vault.User,
+	isNew bool,
 ) error {
+	statsPath, err := bridge.locator.ProvideStatsPath()
+	if err != nil {
+		return fmt.Errorf("failed to get Statistics directory: %w", err)
+	}
+
+	syncSettingsPath, err := bridge.locator.ProvideIMAPSyncConfigPath()
+	if err != nil {
+		return fmt.Errorf("failed to get IMAP sync config path: %w", err)
+	}
+
 	user, err := user.New(
 		ctx,
 		vault,
 		client,
 		bridge.reporter,
 		apiUser,
-		bridge.crashHandler,
-		bridge.vault.SyncWorkers(),
+		bridge.panicHandler,
 		bridge.vault.GetShowAllMail(),
+		bridge.vault.GetMaxSyncMemory(),
+		statsPath,
+		bridge,
+		bridge.serverManager,
+		bridge.serverManager,
+		&bridgeEventSubscription{b: bridge},
+		bridge.syncService,
+		syncSettingsPath,
+		isNew,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
-	}
-
-	// Connect the user's address(es) to gluon.
-	if err := bridge.addIMAPUser(ctx, user); err != nil {
-		return fmt.Errorf("failed to add IMAP user: %w", err)
 	}
 
 	// Handle events coming from the user before forwarding them to the bridge.
@@ -470,11 +572,8 @@ func (bridge *Bridge) addUserWithVault(
 				"event":  event,
 			}).Debug("Received user event")
 
-			if err := bridge.handleUserEvent(ctx, user, event); err != nil {
-				logrus.WithError(err).Error("Failed to handle user event")
-			} else {
-				bridge.publish(event)
-			}
+			bridge.handleUserEvent(ctx, user, event)
+			bridge.publish(event)
 		})
 	})
 
@@ -482,7 +581,7 @@ func (bridge *Bridge) addUserWithVault(
 	// As such, if we find this ID in the context, we should use it to update our user agent.
 	client.AddPreRequestHook(func(_ *resty.Client, r *resty.Request) error {
 		if imapID, ok := imap.GetIMAPIDFromContext(r.Context()); ok {
-			bridge.identifier.SetClient(imapID.Name, imapID.Version)
+			bridge.setUserAgent(imapID.Name, imapID.Version)
 		}
 
 		return nil
@@ -491,7 +590,11 @@ func (bridge *Bridge) addUserWithVault(
 	// Finally, save the user in the bridge.
 	safe.Lock(func() {
 		bridge.users[apiUser.ID] = user
+		bridge.heartbeat.SetNbAccount(len(bridge.users))
 	}, bridge.usersLock)
+
+	// As we need at least one user to send heartbeat, try to send it.
+	bridge.heartbeat.start()
 
 	return nil
 }
@@ -503,34 +606,17 @@ func (bridge *Bridge) newVaultUser(
 	authUID, authRef string,
 	saltedKeyPass []byte,
 ) (*vault.User, bool, error) {
-	if !bridge.vault.HasUser(apiUser.ID) {
-		user, err := bridge.vault.AddUser(apiUser.ID, apiUser.Name, authUID, authRef, saltedKeyPass)
-		if err != nil {
-			return nil, false, fmt.Errorf("failed to add user to vault: %w", err)
-		}
-
-		return user, true, nil
-	}
-
-	user, err := bridge.vault.NewUser(apiUser.ID)
-	if err != nil {
-		return nil, false, err
-	}
-
-	if err := user.SetAuth(authUID, authRef); err != nil {
-		return nil, false, err
-	}
-
-	if err := user.SetKeyPass(saltedKeyPass); err != nil {
-		return nil, false, err
-	}
-
-	return user, false, nil
+	return bridge.vault.GetOrAddUser(apiUser.ID, apiUser.Name, apiUser.Email, authUID, authRef, saltedKeyPass)
 }
 
 // logout logs out the given user, optionally logging them out from the API too.
-func (bridge *Bridge) logoutUser(ctx context.Context, user *user.User, withAPI, withData bool) {
+func (bridge *Bridge) logoutUser(ctx context.Context, user *user.User, withAPI, withData, withTelemetry bool) {
 	defer delete(bridge.users, user.ID())
+
+	// if this is actually a remove account
+	if withData && withAPI {
+		user.SendConfigStatusAbort(ctx, withTelemetry)
+	}
 
 	logrus.WithFields(logrus.Fields{
 		"userID":   user.ID(),
@@ -538,23 +624,27 @@ func (bridge *Bridge) logoutUser(ctx context.Context, user *user.User, withAPI, 
 		"withData": withData,
 	}).Debug("Logging out user")
 
-	if err := bridge.removeIMAPUser(ctx, user, withData); err != nil {
-		logrus.WithError(err).Error("Failed to remove IMAP user")
-	}
-
 	if err := user.Logout(ctx, withAPI); err != nil {
 		logrus.WithError(err).Error("Failed to logout user")
 	}
+
+	bridge.heartbeat.SetNbAccount(len(bridge.users))
 
 	user.Close()
 }
 
 // getUserInfo returns information about a disconnected user.
-func getUserInfo(userID, username string, state UserState, addressMode vault.AddressMode) UserInfo {
+func getUserInfo(userID, username, primaryEmail string, state UserState, addressMode vault.AddressMode) UserInfo {
+	var addresses []string
+	if len(primaryEmail) > 0 {
+		addresses = []string{primaryEmail}
+	}
+
 	return UserInfo{
 		State:       state,
 		UserID:      userID,
 		Username:    username,
+		Addresses:   addresses,
 		AddressMode: addressMode,
 	}
 }

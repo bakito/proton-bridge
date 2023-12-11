@@ -18,13 +18,14 @@
 package main
 
 import (
-	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/crash"
@@ -43,9 +44,10 @@ import (
 )
 
 const (
-	appName = "Proton Mail Launcher"
-	exeName = "bridge"
-	guiName = "bridge-gui"
+	appName      = "Proton Mail Launcher"
+	exeName      = "bridge"
+	guiName      = "bridge-gui"
+	launcherName = "launcher"
 
 	FlagCLI                 = "cli"
 	FlagCLIShort            = "c"
@@ -53,16 +55,17 @@ const (
 	FlagNonInteractiveShort = "n"
 	FlagLauncher            = "--launcher"
 	FlagWait                = "--wait"
+	FlagSessionID           = "--session-id"
 )
 
 func main() { //nolint:funlen
 	logrus.SetLevel(logrus.DebugLevel)
 	l := logrus.WithField("launcher_version", constants.Version)
 
-	reporter := sentry.NewReporter(appName, constants.Version, useragent.New())
+	reporter := sentry.NewReporter(appName, useragent.New())
 
 	crashHandler := crash.NewHandler(reporter.ReportException)
-	defer crashHandler.HandlePanic()
+	defer async.HandlePanic(crashHandler)
 
 	locationsProvider, err := locations.NewDefaultProvider(filepath.Join(constants.VendorName, constants.ConfigName))
 	if err != nil {
@@ -75,11 +78,25 @@ func main() { //nolint:funlen
 	if err != nil {
 		l.WithError(err).Fatal("Failed to get logs path")
 	}
-	crashHandler.AddRecoveryAction(logging.DumpStackTrace(logsPath))
 
-	if err := logging.Init(logsPath, os.Getenv("VERBOSITY")); err != nil {
+	sessionID := logging.NewSessionID()
+	crashHandler.AddRecoveryAction(logging.DumpStackTrace(logsPath, sessionID, launcherName))
+
+	var closer io.Closer
+	if closer, err = logging.Init(
+		logsPath,
+		sessionID,
+		logging.LauncherShortAppName,
+		logging.DefaultMaxLogFileSize,
+		logging.NoPruning,
+		os.Getenv("VERBOSITY"),
+	); err != nil {
 		l.WithError(err).Fatal("Failed to setup logging")
 	}
+
+	defer func() {
+		_ = logging.Close(closer)
+	}()
 
 	updatesPath, err := locations.ProvideUpdatesPath()
 	if err != nil {
@@ -107,7 +124,7 @@ func main() { //nolint:funlen
 
 	args := os.Args[1:]
 
-	exe, err := getPathToUpdatedExecutable(filepath.Base(launcher), versioner, kr, reporter)
+	exe, err := getPathToUpdatedExecutable(filepath.Base(launcher), versioner, kr)
 	if err != nil {
 		exeToLaunch := guiName
 		if inCLIMode(args) {
@@ -127,12 +144,14 @@ func main() { //nolint:funlen
 
 	l = l.WithField("exe_path", exe)
 
-	args, wait, mainExe := findAndStripWait(args)
+	args, wait, mainExes := findAndStripWait(args)
 	if wait {
-		waitForProcessToFinish(mainExe)
+		for _, mainExe := range mainExes {
+			waitForProcessToFinish(mainExe)
+		}
 	}
 
-	cmd := execabs.Command(exe, appendLauncherPath(launcher, args)...) //nolint:gosec
+	cmd := execabs.Command(exe, appendLauncherPath(launcher, append(args, FlagSessionID, string(sessionID)))...) //nolint:gosec
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -186,12 +205,11 @@ func findAndStrip[T comparable](slice []T, v T) (strippedList []T, found bool) {
 }
 
 // findAndStripWait Check for waiter flag get its value and clean them both.
-func findAndStripWait(args []string) ([]string, bool, string) {
+func findAndStripWait(args []string) ([]string, bool, []string) {
 	res := append([]string{}, args...)
 
 	hasFlag := false
-	var value string
-
+	values := make([]string, 0)
 	for k, v := range res {
 		if v != FlagWait {
 			continue
@@ -200,21 +218,22 @@ func findAndStripWait(args []string) ([]string, bool, string) {
 			continue
 		}
 		hasFlag = true
-		value = res[k+1]
+		values = append(values, res[k+1])
 	}
 
 	if hasFlag {
 		res, _ = findAndStrip(res, FlagWait)
-		res, _ = findAndStrip(res, value)
+		for _, v := range values {
+			res, _ = findAndStrip(res, v)
+		}
 	}
-	return res, hasFlag, value
+	return res, hasFlag, values
 }
 
 func getPathToUpdatedExecutable(
 	name string,
 	ver *versioner.Versioner,
 	kr *crypto.KeyRing,
-	reporter *sentry.Reporter,
 ) (string, error) {
 	versions, err := ver.ListVersions()
 	if err != nil {
@@ -235,10 +254,6 @@ func getPathToUpdatedExecutable(
 
 		if err := version.VerifyFiles(kr); err != nil {
 			vlog.WithError(err).Error("Files failed verification and will be removed")
-
-			if err := reporter.ReportMessage(fmt.Sprintf("version %v failed verification: %v", version, err)); err != nil {
-				vlog.WithError(err).Error("Failed to report corrupt update files")
-			}
 
 			if err := version.Remove(); err != nil {
 				vlog.WithError(err).Error("Failed to remove files")

@@ -41,6 +41,22 @@ func NewReportBugErrorEvent() *StreamEvent {
 	return appEvent(&AppEvent{Event: &AppEvent_ReportBugError{ReportBugError: &ReportBugErrorEvent{}}})
 }
 
+func NewReportBugFallbackEvent() *StreamEvent {
+	return appEvent(&AppEvent{Event: &AppEvent_ReportBugFallback{ReportBugFallback: &ReportBugFallbackEvent{}}})
+}
+
+func NewCertInstallSuccessEvent() *StreamEvent {
+	return appEvent(&AppEvent{Event: &AppEvent_CertificateInstallSuccess{CertificateInstallSuccess: &CertificateInstallSuccessEvent{}}})
+}
+
+func NewCertInstallCanceledEvent() *StreamEvent {
+	return appEvent(&AppEvent{Event: &AppEvent_CertificateInstallCanceled{CertificateInstallCanceled: &CertificateInstallCanceledEvent{}}})
+}
+
+func NewCertInstallFailedEvent() *StreamEvent {
+	return appEvent(&AppEvent{Event: &AppEvent_CertificateInstallFailed{CertificateInstallFailed: &CertificateInstallFailedEvent{}}})
+}
+
 func NewShowMainWindowEvent() *StreamEvent {
 	return appEvent(&AppEvent{Event: &AppEvent_ShowMainWindow{ShowMainWindow: &ShowMainWindowEvent{}}})
 }
@@ -53,8 +69,8 @@ func NewLoginTfaRequestedEvent(username string) *StreamEvent {
 	return loginEvent(&LoginEvent{Event: &LoginEvent_TfaRequested{TfaRequested: &LoginTfaRequestedEvent{Username: username}}})
 }
 
-func NewLoginTwoPasswordsRequestedEvent() *StreamEvent {
-	return loginEvent(&LoginEvent{Event: &LoginEvent_TwoPasswordRequested{}})
+func NewLoginTwoPasswordsRequestedEvent(username string) *StreamEvent {
+	return loginEvent(&LoginEvent{Event: &LoginEvent_TwoPasswordRequested{TwoPasswordRequested: &LoginTwoPasswordsRequestedEvent{Username: username}}})
 }
 
 func NewLoginFinishedEvent(userID string, wasSignedOut bool) *StreamEvent {
@@ -145,10 +161,6 @@ func NewKeychainRebuildKeychainEvent() *StreamEvent {
 	return keychainEvent(&KeychainEvent{Event: &KeychainEvent_RebuildKeychain{RebuildKeychain: &RebuildKeychainEvent{}}})
 }
 
-func NewMailNoActiveKeyForRecipientEvent(email string) *StreamEvent {
-	return mailEvent(&MailEvent{Event: &MailEvent_NoActiveKeyForRecipientEvent{NoActiveKeyForRecipientEvent: &NoActiveKeyForRecipientEvent{Email: email}}})
-}
-
 func NewMailAddressChangeEvent(email string) *StreamEvent {
 	return mailEvent(&MailEvent{Event: &MailEvent_AddressChanged{AddressChanged: &AddressChangedEvent{Address: email}}})
 }
@@ -171,6 +183,35 @@ func NewUserDisconnectedEvent(email string) *StreamEvent {
 
 func NewUserChangedEvent(userID string) *StreamEvent {
 	return userEvent(&UserEvent{Event: &UserEvent_UserChanged{UserChanged: &UserChangedEvent{UserID: userID}}})
+}
+
+func NewUserBadEvent(userID string, errorMessage string) *StreamEvent {
+	return userEvent(&UserEvent{Event: &UserEvent_UserBadEvent{UserBadEvent: &UserBadEvent{UserID: userID, ErrorMessage: errorMessage}}})
+}
+
+func NewUsedBytesChangedEvent(userID string, usedBytes uint64) *StreamEvent {
+	return userEvent(&UserEvent{Event: &UserEvent_UsedBytesChangedEvent{UsedBytesChangedEvent: &UsedBytesChangedEvent{UserID: userID, UsedBytes: int64(usedBytes)}}})
+}
+
+func newIMAPLoginFailedEvent(username string) *StreamEvent {
+	return userEvent(&UserEvent{Event: &UserEvent_ImapLoginFailedEvent{ImapLoginFailedEvent: &ImapLoginFailedEvent{Username: username}}})
+}
+
+func NewSyncStartedEvent(userID string) *StreamEvent {
+	return userEvent(&UserEvent{Event: &UserEvent_SyncStartedEvent{SyncStartedEvent: &SyncStartedEvent{UserID: userID}}})
+}
+
+func NewSyncFinishedEvent(userID string) *StreamEvent {
+	return userEvent(&UserEvent{Event: &UserEvent_SyncFinishedEvent{SyncFinishedEvent: &SyncFinishedEvent{UserID: userID}}})
+}
+
+func NewSyncProgressEvent(userID string, progress float64, elapsedMs, remainingMs int64) *StreamEvent {
+	return userEvent(&UserEvent{Event: &UserEvent_SyncProgressEvent{SyncProgressEvent: &SyncProgressEvent{
+		UserID:      userID,
+		Progress:    progress,
+		ElapsedMs:   elapsedMs,
+		RemainingMs: remainingMs,
+	}}})
 }
 
 func NewGenericErrorEvent(errorCode ErrorCode) *StreamEvent {

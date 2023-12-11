@@ -20,7 +20,10 @@ package cli
 
 import (
 	"errors"
+	"os"
+	"runtime"
 
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
@@ -37,15 +40,32 @@ type frontendCLI struct {
 
 	bridge    *bridge.Bridge
 	restarter *restarter.Restarter
+
+	badUserID string
+
+	panicHandler async.PanicHandler
 }
 
 // New returns a new CLI frontend configured with the given options.
-func New(bridge *bridge.Bridge, restarter *restarter.Restarter, eventCh <-chan events.Event) *frontendCLI { //nolint:funlen,revive
+func New(
+	bridge *bridge.Bridge,
+	restarter *restarter.Restarter,
+	eventCh <-chan events.Event,
+	panicHandler async.PanicHandler,
+	quitCh <-chan struct{},
+) *frontendCLI { //nolint:revive
 	fe := &frontendCLI{
-		Shell:     ishell.New(),
-		bridge:    bridge,
-		restarter: restarter,
+		Shell:        ishell.New(),
+		bridge:       bridge,
+		restarter:    restarter,
+		badUserID:    "",
+		panicHandler: panicHandler,
 	}
+
+	// We want to exit at the first Ctrl+C. By default, ishell requires two.
+	fe.Interrupt(func(_ *ishell.Context, _ int, _ string) {
+		os.Exit(1)
+	})
 
 	// Clear commands.
 	clearCmd := &ishell.Cmd{
@@ -126,21 +146,52 @@ func New(bridge *bridge.Bridge, restarter *restarter.Restarter, eventCh <-chan e
 	})
 	fe.AddCmd(dohCmd)
 
-	// Apple Mail commands.
-	configureCmd := &ishell.Cmd{
-		Name: "configure-apple-mail",
-		Help: "Configures Apple Mail to use ProtonMail Bridge",
-		Func: fe.configureAppleMail,
+	//goland:noinspection GoBoolExpressions
+	if runtime.GOOS == "darwin" {
+		// Apple Mail commands.
+		configureCmd := &ishell.Cmd{
+			Name: "configure-apple-mail",
+			Help: "Configures Apple Mail to use ProtonMail Bridge",
+			Func: fe.configureAppleMail,
+		}
+		fe.AddCmd(configureCmd)
 	}
-	fe.AddCmd(configureCmd)
 
 	// TLS commands.
-	exportTLSCmd := &ishell.Cmd{
-		Name: "export-tls",
-		Help: "Export the TLS certificate used by the Bridge",
-		Func: fe.exportTLSCerts,
+	certCmd := &ishell.Cmd{
+		Name: "cert",
+		Help: "Manage the TLS certificate used by Bridge",
 	}
-	fe.AddCmd(exportTLSCmd)
+
+	//goland:noinspection GoBoolExpressions
+	if runtime.GOOS == "darwin" {
+		certCmd.AddCmd(&ishell.Cmd{
+			Name: "status",
+			Help: "Check if the TLS certificate used by Bridge is installed in the OS keychain",
+			Func: fe.tlsCertStatus,
+		})
+		certCmd.AddCmd(&ishell.Cmd{
+			Name: "install",
+			Help: "Install TLS certificate used by Bridge in the OS keychain",
+			Func: fe.installTLSCert,
+		})
+		certCmd.AddCmd(&ishell.Cmd{
+			Name: "uninstall",
+			Help: "Uninstall the TLS certificate used by Bridge from the OS keychain",
+			Func: fe.uninstallTLSCert,
+		})
+	}
+	certCmd.AddCmd(&ishell.Cmd{
+		Name: "export",
+		Help: "Export the TLS certificate used by Bridge",
+		Func: fe.exportTLSCerts,
+	})
+	certCmd.AddCmd(&ishell.Cmd{
+		Name: "import",
+		Help: "Import a TLS certificate to be used by Bridge",
+		Func: fe.importTLSCerts,
+	})
+	fe.AddCmd(certCmd)
 
 	// All mail visibility commands.
 	allMailCmd := &ishell.Cmd{
@@ -256,12 +307,65 @@ func New(bridge *bridge.Bridge, restarter *restarter.Restarter, eventCh <-chan e
 		Completer: fe.completeUsernames,
 	})
 
+	badEventCmd := &ishell.Cmd{
+		Name: "bad-event",
+		Help: "manage actions when bad event error occurs",
+	}
+	badEventCmd.AddCmd(&ishell.Cmd{
+		Name: "synchronize",
+		Help: "synchronize your local database to resolve the bad event error",
+		Func: fe.badEventSynchronize,
+	})
+	badEventCmd.AddCmd(&ishell.Cmd{
+		Name: "logout",
+		Help: "logout to deal with bad event error later",
+		Func: fe.badEventLogout,
+	})
+	fe.AddCmd(badEventCmd)
+
+	// Telemetry commands
+	telemetryCmd := &ishell.Cmd{
+		Name: "telemetry",
+		Help: "choose whether usage diagnostics are collected or not",
+	}
+	telemetryCmd.AddCmd(&ishell.Cmd{
+		Name: "enable",
+		Help: "Usage diagnostics collection will be enabled",
+		Func: fe.enableTelemetry,
+	})
+	telemetryCmd.AddCmd(&ishell.Cmd{
+		Name: "disable",
+		Help: "Usage diagnostics collection will be disabled",
+		Func: fe.disableTelemetry,
+	})
+	fe.AddCmd(telemetryCmd)
+
+	dbgCmd := &ishell.Cmd{
+		Name: "debug",
+		Help: "Debug diagnostics ",
+	}
+
+	dbgCmd.AddCmd(&ishell.Cmd{
+		Name: "mailbox-state",
+		Help: "Verify local mailbox state against proton server state",
+		Func: fe.debugMailboxState,
+	})
+
+	fe.AddCmd(dbgCmd)
+
 	go fe.watchEvents(eventCh)
+
+	go func() {
+		<-quitCh
+		fe.Close()
+	}()
 
 	return fe
 }
 
-func (f *frontendCLI) watchEvents(eventCh <-chan events.Event) { // nolint:funlen
+func (f *frontendCLI) watchEvents(eventCh <-chan events.Event) { // nolint:gocyclo
+	defer async.HandlePanic(f.panicHandler)
+
 	// GODT-1949: Better error events.
 	for _, err := range f.bridge.GetErrors() {
 		switch {
@@ -270,12 +374,6 @@ func (f *frontendCLI) watchEvents(eventCh <-chan events.Event) { // nolint:funle
 
 		case errors.Is(err, bridge.ErrVaultInsecure):
 			f.notifyCredentialsError()
-
-		case errors.Is(err, bridge.ErrServeIMAP):
-			f.Println("IMAP server error:", err)
-
-		case errors.Is(err, bridge.ErrServeSMTP):
-			f.Println("SMTP server error:", err)
 		}
 	}
 
@@ -287,6 +385,12 @@ func (f *frontendCLI) watchEvents(eventCh <-chan events.Event) { // nolint:funle
 		case events.ConnStatusDown:
 			f.notifyInternetOff()
 
+		case events.IMAPServerError:
+			f.Println("IMAP server error:", event.Error)
+
+		case events.SMTPServerError:
+			f.Println("SMTP server error:", event.Error)
+
 		case events.UserDeauth:
 			user, err := f.bridge.GetUserInfo(event.UserID)
 			if err != nil {
@@ -295,16 +399,49 @@ func (f *frontendCLI) watchEvents(eventCh <-chan events.Event) { // nolint:funle
 
 			f.notifyLogout(user.Username)
 
-		case events.UserAddressUpdated:
+		case events.UserBadEvent:
 			user, err := f.bridge.GetUserInfo(event.UserID)
 			if err != nil {
 				return
 			}
 
-			f.Printf("Address changed for %s. You may need to reconfigure your email client.\n", user.Username)
+			f.badUserID = event.UserID
+
+			f.Printf("\nInternal Error\n\n")
+			f.Printf("Bridge ran into an internal error and it is not able proceed with %s.\n", user.Username)
+			f.Printf("Synchronize your local database now or logout to do it later.\n")
+			f.Printf("Synchronization time depends on the size of your mailbox.\n")
+			f.Printf("\n\n")
+			f.Printf("The allowed actions are:\n")
+			f.Printf("* bad-event synchronize\n")
+			f.Printf("* bad-event logout\n\n")
+
+		case events.IMAPLoginFailed:
+			f.Printf("An IMAP login attempt failed for user %v\n", event.Username)
+
+		case events.UserAddressEnabled:
+			user, err := f.bridge.GetUserInfo(event.UserID)
+			if err != nil {
+				return
+			}
+
+			f.Printf("An address for %s was enabled. You may need to reconfigure your email client.\n", user.Username)
+
+		case events.UserAddressDisabled:
+			user, err := f.bridge.GetUserInfo(event.UserID)
+			if err != nil {
+				return
+			}
+
+			f.Printf("An address for %s was disabled. You may need to reconfigure your email client.\n", user.Username)
 
 		case events.UserAddressDeleted:
-			f.notifyLogout(event.Email)
+			user, err := f.bridge.GetUserInfo(event.UserID)
+			if err != nil {
+				return
+			}
+
+			f.Printf("An address for %s was disabled. You may need to reconfigure your email client.\n", user.Username)
 
 		case events.SyncStarted:
 			user, err := f.bridge.GetUserInfo(event.UserID)

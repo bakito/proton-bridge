@@ -21,13 +21,17 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ProtonMail/gluon/rfc822"
+	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/message"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/message/parser"
+	pmmime "github.com/ProtonMail/proton-bridge/v3/pkg/mime"
 	"github.com/bradenaw/juniper/xslices"
 	"github.com/cucumber/messages-go/v16"
 	"github.com/emersion/go-imap"
@@ -42,13 +46,42 @@ type Message struct {
 	MessageID   string `bdd:"message-id"`
 	Date        string `bdd:"date"`
 
-	From string `bdd:"from"`
-	To   string `bdd:"to"`
-	CC   string `bdd:"cc"`
-	BCC  string `bdd:"bcc"`
+	From    string `bdd:"from"`
+	To      string `bdd:"to"`
+	CC      string `bdd:"cc"`
+	BCC     string `bdd:"bcc"`
+	ReplyTo string `bdd:"reply-to"`
 
 	Unread  bool `bdd:"unread"`
 	Deleted bool `bdd:"deleted"`
+
+	InReplyTo  string `bdd:"in-reply-to"`
+	References string `bdd:"references"`
+}
+
+type MessageStruct struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	CC      string `json:"cc"`
+	BCC     string `json:"bcc"`
+	Subject string `json:"subject"`
+	Date    string `json:"date"`
+
+	Content MessageSection `json:"content"`
+}
+
+type MessageSection struct {
+	ContentType                string           `json:"content-type"`
+	ContentTypeBoundary        string           `json:"content-type-boundary"`
+	ContentTypeCharset         string           `json:"content-type-charset"`
+	ContentTypeName            string           `json:"content-type-name"`
+	ContentDisposition         string           `json:"content-disposition"`
+	ContentDispositionFilename string           `json:"content-disposition-filename"`
+	Sections                   []MessageSection `json:"sections"`
+
+	TransferEncoding string `json:"transfer-encoding"`
+	BodyContains     string `json:"body-contains"`
+	BodyIs           string `json:"body-is"`
 }
 
 func (msg Message) Build() []byte {
@@ -72,6 +105,14 @@ func (msg Message) Build() []byte {
 
 	if msg.Subject != "" {
 		b = append(b, "Subject: "+msg.Subject+"\r\n"...)
+	}
+
+	if msg.InReplyTo != "" {
+		b = append(b, "In-Reply-To: "+msg.InReplyTo+"\r\n"...)
+	}
+
+	if msg.References != "" {
+		b = append(b, "References: "+msg.References+"\r\n"...)
 	}
 
 	if msg.Date != "" {
@@ -125,6 +166,9 @@ func newMessageFromIMAP(msg *imap.Message) Message {
 		Unread:      !slices.Contains(msg.Flags, imap.SeenFlag),
 		Deleted:     slices.Contains(msg.Flags, imap.DeletedFlag),
 		Date:        msg.Envelope.Date.Format(time.RFC822Z),
+		InReplyTo:   msg.Envelope.InReplyTo,
+		// Go-imap only supports in-reply-to so we have to mimic other client by using it as references.
+		References: msg.Envelope.InReplyTo,
 	}
 
 	if len(msg.Envelope.From) > 0 {
@@ -143,7 +187,138 @@ func newMessageFromIMAP(msg *imap.Message) Message {
 		message.BCC = msg.Envelope.Bcc[0].Address()
 	}
 
+	if len(msg.Envelope.ReplyTo) > 0 {
+		message.ReplyTo = msg.Envelope.ReplyTo[0].Address()
+	}
+
 	return message
+}
+
+func newMessageStructFromIMAP(msg *imap.Message) MessageStruct {
+	section, err := imap.ParseBodySectionName("BODY[]")
+	if err != nil {
+		panic(err)
+	}
+
+	literal, err := io.ReadAll(msg.GetBody(section))
+	if err != nil {
+		panic(err)
+	}
+
+	parser, err := parser.New(bytes.NewReader(literal))
+	if err != nil {
+		panic(err)
+	}
+
+	m, err := message.ParseWithParser(parser, true)
+	if err != nil {
+		panic(err)
+	}
+
+	var body string
+	switch {
+	case m.MIMEType == rfc822.TextPlain:
+		body = strings.TrimSpace(string(m.PlainBody))
+	case m.MIMEType == rfc822.MultipartMixed:
+		_, body, _ = strings.Cut(string(m.MIMEBody), "\r\n\r\n")
+	default:
+		body = strings.TrimSpace(string(m.RichBody))
+	}
+
+	message := MessageStruct{
+		Subject: msg.Envelope.Subject,
+		Date:    msg.Envelope.Date.Format(time.RFC822Z),
+		From:    formatAddressList(msg.Envelope.From),
+		To:      formatAddressList(msg.Envelope.To),
+		CC:      formatAddressList(msg.Envelope.Cc),
+		BCC:     formatAddressList(msg.Envelope.Bcc),
+
+		Content: parseMessageSection([]byte(strings.TrimSpace(string(literal))), strings.TrimSpace(body)),
+	}
+	return message
+}
+
+func formatAddressList(list []*imap.Address) string {
+	var res string
+	for idx, address := range list {
+		if address.PersonalName != "" {
+			res += address.PersonalName + " <" + address.Address() + ">"
+		} else {
+			res += address.Address()
+		}
+		if idx < len(list)-1 {
+			res += "; "
+		}
+	}
+	return res
+}
+
+func parseMessageSection(literal []byte, body string) MessageSection {
+	headers, err := rfc822.Parse(literal).ParseHeader()
+	if err != nil {
+		panic(err)
+	}
+
+	mimeType, boundary, charset, name := parseContentType(headers.Get("Content-Type"))
+	disp, filename := parseContentDisposition(headers.Get("Content-Disposition"))
+
+	msgSect := MessageSection{
+		ContentType:                mimeType,
+		ContentTypeBoundary:        boundary,
+		ContentTypeCharset:         charset,
+		ContentTypeName:            name,
+		ContentDisposition:         disp,
+		ContentDispositionFilename: filename,
+		TransferEncoding:           headers.Get("content-transfer-encoding"),
+		BodyIs:                     body,
+	}
+
+	if msgSect.ContentTypeBoundary != "" {
+		sections := bytes.Split(literal, []byte("--"+msgSect.ContentTypeBoundary))
+		// Remove last element that will be the -- from finale boundary
+		sections = sections[:len(sections)-1]
+		sections = sections[1:]
+		for _, v := range sections {
+			str := strings.TrimSpace(string(v))
+			_, sectionBody, found := strings.Cut(str, "\r\n\r\n")
+			if !found {
+				if _, sectionBody, found = strings.Cut(str, "\n\n"); !found {
+					sectionBody = str
+				}
+			}
+			msgSect.Sections = append(msgSect.Sections, parseMessageSection([]byte(str), strings.TrimSpace(sectionBody)))
+		}
+	}
+	return msgSect
+}
+
+func parseContentType(contentType string) (string, string, string, string) {
+	mimeType, params, err := pmmime.ParseMediaType(contentType)
+	if err != nil {
+		panic(err)
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		boundary = ""
+	}
+	charset, ok := params["charset"]
+	if !ok {
+		charset = ""
+	}
+	name, ok := params["name"]
+	if !ok {
+		name = ""
+	}
+	return mimeType, boundary, charset, name
+}
+
+func parseContentDisposition(contentDisp string) (string, string) {
+	disp, params, _ := pmmime.ParseMediaType(contentDisp)
+	name, ok := params["filename"]
+	if !ok {
+		name = ""
+	}
+	return disp, name
 }
 
 func matchMessages(have, want []Message) error {
@@ -160,6 +335,80 @@ func matchMessages(have, want []Message) error {
 	}
 
 	return nil
+}
+
+func matchStructure(have []MessageStruct, want MessageStruct) error {
+	mismatches := make([]string, 0)
+	for _, msg := range have {
+		if want.From != "" && msg.From != want.From {
+			mismatches = append(mismatches, "From")
+			continue
+		}
+		if want.To != "" && msg.To != want.To {
+			mismatches = append(mismatches, "To")
+			continue
+		}
+		if want.BCC != "" && msg.BCC != want.BCC {
+			mismatches = append(mismatches, "BCC")
+			continue
+		}
+		if want.CC != "" && msg.CC != want.CC {
+			mismatches = append(mismatches, "CC")
+			continue
+		}
+		if want.Subject != "" && msg.Subject != want.Subject {
+			mismatches = append(mismatches, "Subject")
+			continue
+		}
+		if want.Date != "" && want.Date != msg.Date {
+			mismatches = append(mismatches, "Date")
+			continue
+		}
+
+		if ok, mismatch := matchContent(msg.Content, want.Content); !ok {
+			mismatches = append(mismatches, "Content: "+mismatch)
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("missing messages: have %#v, want %#v with mismatch list %#v", have, want, mismatches)
+}
+
+func matchContent(have MessageSection, want MessageSection) (bool, string) {
+	if want.ContentType != "" && want.ContentType != have.ContentType {
+		return false, "ContentType"
+	}
+	if want.ContentTypeBoundary != "" && want.ContentTypeBoundary != have.ContentTypeBoundary {
+		return false, "ContentTypeBoundary"
+	}
+	if want.ContentTypeCharset != "" && want.ContentTypeCharset != have.ContentTypeCharset {
+		return false, "ContentTypeCharset"
+	}
+	if want.ContentTypeName != "" && want.ContentTypeName != have.ContentTypeName {
+		return false, "ContentTypeName"
+	}
+	if want.ContentDisposition != "" && want.ContentDisposition != have.ContentDisposition {
+		return false, "ContentDisposition"
+	}
+	if want.ContentDispositionFilename != "" && want.ContentDispositionFilename != have.ContentDispositionFilename {
+		return false, "ContentDispositionFilename"
+	}
+	if want.TransferEncoding != "" && want.TransferEncoding != have.TransferEncoding {
+		return false, "TransferEncoding"
+	}
+	if want.BodyContains != "" && !strings.Contains(strings.TrimSpace(have.BodyIs), strings.TrimSpace(want.BodyContains)) {
+		return false, "BodyContains"
+	}
+	if want.BodyIs != "" && strings.TrimSpace(have.BodyIs) != strings.TrimSpace(want.BodyIs) {
+		return false, "BodyIs"
+	}
+
+	for i, section := range want.Sections {
+		if ok, mismatch := matchContent(have.Sections[i], section); !ok {
+			return false, fmt.Sprintf("section %#v - %#v", i, mismatch)
+		}
+	}
+	return true, ""
 }
 
 type Mailbox struct {
@@ -194,8 +443,15 @@ func matchMailboxes(have, want []Mailbox) error {
 
 func eventually(condition func() error) error {
 	ch := make(chan error, 1)
+	var lastErr error
 
-	timer := time.NewTimer(30 * time.Second)
+	var timerDuration = 30 * time.Second
+	// Extend to 5min for live API.
+	if hostURL := os.Getenv("FEATURE_TEST_HOST_URL"); hostURL != "" {
+		timerDuration = 600 * time.Second
+	}
+
+	timer := time.NewTimer(timerDuration)
 	defer timer.Stop()
 
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -204,7 +460,7 @@ func eventually(condition func() error) error {
 	for tick := ticker.C; ; {
 		select {
 		case <-timer.C:
-			return fmt.Errorf("timed out")
+			return fmt.Errorf("timed out: %w", lastErr)
 
 		case <-tick:
 			tick = nil
@@ -216,6 +472,7 @@ func eventually(condition func() error) error {
 				return nil
 			}
 
+			lastErr = err
 			tick = ticker.C
 		}
 	}
@@ -298,4 +555,20 @@ func mustParseBool(s string) bool {
 	}
 
 	return v
+}
+
+type Contact struct {
+	Name    string `bdd:"name"`
+	Email   string `bdd:"email"`
+	Format  string `bdd:"format"`
+	Scheme  string `bdd:"scheme"`
+	Sign    string `bdd:"signature"`
+	Encrypt string `bdd:"encryption"`
+}
+
+type MailSettings struct {
+	DraftMIMEType   rfc822.MIMEType             `bdd:"DraftMIMEType"`
+	AttachPublicKey proton.Bool                 `bdd:"AttachPublicKey"`
+	Sign            proton.SignExternalMessages `bdd:"Sign"`
+	PGPScheme       proton.EncryptionScheme     `bdd:"PGPScheme"`
 }

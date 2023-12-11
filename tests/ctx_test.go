@@ -20,6 +20,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/smtp"
 	"net/url"
 	"regexp"
@@ -29,37 +30,113 @@ import (
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/ProtonMail/gluon/queue"
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/go-proton-api/server"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	frontend "github.com/ProtonMail/proton-bridge/v3/internal/frontend/grpc"
 	"github.com/ProtonMail/proton-bridge/v3/internal/locations"
+	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/bradenaw/juniper/xslices"
 	"github.com/cucumber/godog"
 	"github.com/emersion/go-imap/client"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/exp/maps"
 	"google.golang.org/grpc"
 )
 
 var defaultVersion = semver.MustParse("3.0.6")
 
+type testUser struct {
+	name       string      // the test user name
+	userID     string      // the user's account ID
+	addresses  []*testAddr // the user's addresses
+	userPass   string      // the user's account password
+	bridgePass string      // the user's bridge password
+}
+
+func newTestUser(userID, name, userPass string) *testUser {
+	return &testUser{
+		userID:   userID,
+		name:     name,
+		userPass: userPass,
+	}
+}
+
+func (user *testUser) getName() string {
+	return user.name
+}
+
+func (user *testUser) getUserID() string {
+	return user.userID
+}
+
+func (user *testUser) getEmails() []string {
+	return xslices.Map(user.addresses, func(addr *testAddr) string {
+		return addr.email
+	})
+}
+
+func (user *testUser) getAddrID(email string) string {
+	for _, addr := range user.addresses {
+		if addr.email == email {
+			return addr.addrID
+		}
+	}
+
+	panic(fmt.Sprintf("unknown email %q", email))
+}
+
+func (user *testUser) addAddress(addrID, email string) {
+	user.addresses = append(user.addresses, newTestAddr(addrID, email))
+}
+
+func (user *testUser) remAddress(addrID string) {
+	user.addresses = xslices.Filter(user.addresses, func(addr *testAddr) bool {
+		return addr.addrID != addrID
+	})
+}
+
+func (user *testUser) getUserPass() string {
+	return user.userPass
+}
+
+func (user *testUser) getBridgePass() string {
+	return user.bridgePass
+}
+
+func (user *testUser) setBridgePass(pass string) {
+	user.bridgePass = pass
+}
+
+type testAddr struct {
+	addrID string // the remote address ID
+	email  string // the test address email
+}
+
+func newTestAddr(addrID, email string) *testAddr {
+	return &testAddr{
+		addrID: addrID,
+		email:  email,
+	}
+}
+
 type testCtx struct {
 	// These are the objects supporting the test.
-	dir      string
-	api      API
-	netCtl   *proton.NetCtl
-	locator  *locations.Locations
-	storeKey []byte
-	version  *semver.Version
-	mocks    *bridge.Mocks
-	events   *eventCollector
-	reporter *reportRecorder
+	dir       string
+	api       API
+	netCtl    *proton.NetCtl
+	locator   *locations.Locations
+	storeKey  []byte
+	version   *semver.Version
+	mocks     *bridge.Mocks
+	events    *eventCollector
+	reporter  *reportRecorder
+	heartbeat *heartbeatRecorder
 
 	// bridge holds the bridge app under test.
 	bridge *bridge.Bridge
+	vault  *vault.Vault
 
 	// service holds the gRPC frontend service under test.
 	service   *frontend.Service
@@ -68,15 +145,13 @@ type testCtx struct {
 	// client holds the gRPC frontend client under test.
 	client        frontend.BridgeClient
 	clientConn    *grpc.ClientConn
-	clientEventCh *queue.QueuedChannel[*frontend.StreamEvent]
+	clientEventCh *async.QueuedChannel[*frontend.StreamEvent]
 
-	// These maps hold expected userIDByName, their primary addresses and bridge passwords.
-	userUUIDByName     map[string]string
-	addrUUIDByName     map[string]string
-	userIDByName       map[string]string
-	userAddrByEmail    map[string]map[string]string
-	userPassByID       map[string]string
-	userBridgePassByID map[string][]byte
+	// These maps hold test objects created during the test.
+	userByID       map[string]*testUser
+	userUUIDByName map[string]string
+	addrByID       map[string]*testAddr
+	addrUUIDByName map[string]string
 
 	// These are the IMAP and SMTP clients used to connect to bridge.
 	imapClients map[string]*imapClient
@@ -89,6 +164,12 @@ type testCtx struct {
 	// errors holds test-related errors encountered while running test steps.
 	errors     [][]error
 	errorsLock sync.RWMutex
+
+	// This slice contains the dummy listeners that are intended to block network ports.
+	dummyListeners []net.Listener
+
+	imapServerStarted bool
+	smtpServerStarted bool
 }
 
 type imapClient struct {
@@ -105,22 +186,21 @@ func newTestCtx(tb testing.TB) *testCtx {
 	dir := tb.TempDir()
 
 	t := &testCtx{
-		dir:      dir,
-		api:      newTestAPI(),
-		netCtl:   proton.NewNetCtl(),
-		locator:  locations.New(bridge.NewTestLocationsProvider(dir), "config-name"),
-		storeKey: []byte("super-secret-store-key"),
-		version:  defaultVersion,
-		mocks:    bridge.NewMocks(tb, defaultVersion, defaultVersion),
-		events:   newEventCollector(),
-		reporter: newReportRecorder(tb),
+		dir:       dir,
+		api:       newTestAPI(),
+		netCtl:    proton.NewNetCtl(),
+		locator:   locations.New(bridge.NewTestLocationsProvider(dir), "config-name"),
+		storeKey:  []byte("super-secret-store-key"),
+		version:   defaultVersion,
+		mocks:     bridge.NewMocks(tb, defaultVersion, defaultVersion),
+		events:    newEventCollector(),
+		reporter:  newReportRecorder(tb),
+		heartbeat: newHeartbeatRecorder(tb),
 
-		userUUIDByName:     make(map[string]string),
-		addrUUIDByName:     make(map[string]string),
-		userIDByName:       make(map[string]string),
-		userAddrByEmail:    make(map[string]map[string]string),
-		userPassByID:       make(map[string]string),
-		userBridgePassByID: make(map[string][]byte),
+		userByID:       make(map[string]*testUser),
+		userUUIDByName: make(map[string]string),
+		addrByID:       make(map[string]*testAddr),
+		addrUUIDByName: make(map[string]string),
 
 		imapClients: make(map[string]*imapClient),
 		smtpClients: make(map[string]*smtpClient),
@@ -155,7 +235,7 @@ func (t *testCtx) replace(value string) string {
 		return t.userUUIDByName[name]
 	})
 
-	// Replace [addr:EMAIL] with a unique address for the email EMAIL.
+	// Replace [alias:EMAIL] with a unique address for the email EMAIL.
 	value = regexp.MustCompile(`\[alias:(\w+)\]`).ReplaceAllStringFunc(value, func(match string) string {
 		email := regexp.MustCompile(`\[alias:(\w+)\]`).FindStringSubmatch(match)[1]
 
@@ -167,7 +247,7 @@ func (t *testCtx) replace(value string) string {
 		return t.addrUUIDByName[email]
 	})
 
-	// Replace {upper:VALUE} with VALUE in uppercase.
+	// Replace {toUpper:VALUE} with VALUE in uppercase.
 	value = regexp.MustCompile(`\{toUpper:([^}]+)\}`).ReplaceAllStringFunc(value, func(match string) string {
 		return strings.ToUpper(regexp.MustCompile(`\{toUpper:([^}].+)\}`).FindStringSubmatch(match)[1])
 	})
@@ -192,62 +272,22 @@ func (t *testCtx) afterStep(st *godog.Step, status godog.StepResultStatus) {
 	logrus.Debugf("Finished step (%v): %s", status, st.Text)
 }
 
-func (t *testCtx) getName(wantUserID string) string {
-	for name, userID := range t.userIDByName {
-		if userID == wantUserID {
-			return name
+func (t *testCtx) addUser(userID, name, userPass string) {
+	t.userByID[userID] = newTestUser(userID, name, userPass)
+}
+
+func (t *testCtx) getUserByName(name string) *testUser {
+	for _, user := range t.userByID {
+		if user.name == name {
+			return user
 		}
 	}
 
-	panic(fmt.Sprintf("unknown user ID %q", wantUserID))
+	panic(fmt.Sprintf("user %q not found", name))
 }
 
-func (t *testCtx) getUserID(username string) string {
-	return t.userIDByName[username]
-}
-
-func (t *testCtx) setUserID(username, userID string) {
-	t.userIDByName[username] = userID
-}
-
-func (t *testCtx) getUserAddrID(userID, email string) string {
-	return t.userAddrByEmail[userID][email]
-}
-
-func (t *testCtx) getUserAddrs(userID string) []string {
-	return maps.Keys(t.userAddrByEmail[userID])
-}
-
-func (t *testCtx) setUserAddr(userID, addrID, email string) {
-	if _, ok := t.userAddrByEmail[userID]; !ok {
-		t.userAddrByEmail[userID] = make(map[string]string)
-	}
-
-	t.userAddrByEmail[userID][email] = addrID
-}
-
-func (t *testCtx) unsetUserAddr(userID, wantAddrID string) {
-	for email, addrID := range t.userAddrByEmail[userID] {
-		if addrID == wantAddrID {
-			delete(t.userAddrByEmail[userID], email)
-		}
-	}
-}
-
-func (t *testCtx) getUserPass(userID string) string {
-	return t.userPassByID[userID]
-}
-
-func (t *testCtx) setUserPass(userID, pass string) {
-	t.userPassByID[userID] = pass
-}
-
-func (t *testCtx) getUserBridgePass(userID string) string {
-	return string(t.userBridgePassByID[userID])
-}
-
-func (t *testCtx) setUserBridgePass(userID string, pass []byte) {
-	t.userBridgePassByID[userID] = pass
+func (t *testCtx) getUserByID(userID string) *testUser {
+	return t.userByID[userID]
 }
 
 func (t *testCtx) getMBoxID(userID string, name string) string {
@@ -256,7 +296,7 @@ func (t *testCtx) getMBoxID(userID string, name string) string {
 
 	var labelID string
 
-	if err := t.withClient(ctx, t.getName(userID), func(ctx context.Context, client *proton.Client) error {
+	if err := t.withClient(ctx, t.getUserByID(userID).getName(), func(ctx context.Context, client *proton.Client) error {
 		labels, err := client.GetLabels(ctx, proton.LabelTypeLabel, proton.LabelTypeFolder, proton.LabelTypeSystem)
 		if err != nil {
 			panic(err)
@@ -320,6 +360,35 @@ func (t *testCtx) getDraftID(username string, draftIndex int) (string, error) {
 }
 
 func (t *testCtx) getLastCall(method, pathExp string) (server.Call, error) {
+	matches, err := t.getAllCalls(method, pathExp)
+	if err != nil {
+		return server.Call{}, err
+	}
+	if len(matches) > 0 {
+		return matches[len(matches)-1], nil
+	}
+	return server.Call{}, fmt.Errorf("no call with method %q and path %q was made", method, pathExp)
+}
+
+func (t *testCtx) getAllCalls(method, pathExp string) ([]server.Call, error) {
+	t.callsLock.RLock()
+	defer t.callsLock.RUnlock()
+
+	root, err := url.Parse(t.api.GetHostURL())
+	if err != nil {
+		return []server.Call{}, err
+	}
+
+	if matches := xslices.Filter(xslices.Join(t.calls...), func(call server.Call) bool {
+		return call.Method == method && regexp.MustCompile("^"+pathExp+"$").MatchString(strings.TrimPrefix(call.URL.Path, root.Path))
+	}); len(matches) > 0 {
+		return matches, nil
+	}
+
+	return []server.Call{}, fmt.Errorf("no call with method %q and path %q was made", method, pathExp)
+}
+
+func (t *testCtx) getLastCallExcludingHTTPOverride(method, pathExp string) (server.Call, error) {
 	t.callsLock.RLock()
 	defer t.callsLock.RUnlock()
 
@@ -329,6 +398,10 @@ func (t *testCtx) getLastCall(method, pathExp string) (server.Call, error) {
 	}
 
 	if matches := xslices.Filter(xslices.Join(t.calls...), func(call server.Call) bool {
+		if len(call.RequestHeader.Get("X-HTTP-Method-Override")) != 0 || len(call.RequestHeader.Get("X-Http-Method")) != 0 {
+			return false
+		}
+
 		return call.Method == method && regexp.MustCompile("^"+pathExp+"$").MatchString(strings.TrimPrefix(call.URL.Path, root.Path))
 	}); len(matches) > 0 {
 		return matches[len(matches)-1], nil
@@ -383,6 +456,12 @@ func (t *testCtx) close(ctx context.Context) {
 	if t.bridge != nil {
 		if err := t.closeBridge(ctx); err != nil {
 			logrus.WithError(err).Error("Failed to close bridge")
+		}
+	}
+
+	for _, listener := range t.dummyListeners {
+		if err := listener.Close(); err != nil {
+			logrus.WithError(err).Errorf("Failed to close dummy listener %v", listener.Addr())
 		}
 	}
 

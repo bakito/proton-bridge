@@ -31,14 +31,18 @@ const (
 	MacOSKeychain = "macos-keychain"
 )
 
-func init() { //nolint:gochecknoinits
-	Helpers = make(map[string]helperConstructor)
+func listHelpers() (Helpers, string) {
+	helpers := make(Helpers)
 
 	// MacOS always provides a keychain.
-	Helpers[MacOSKeychain] = newMacOSHelper
+	if isUsable(newMacOSHelper("")) {
+		helpers[MacOSKeychain] = newMacOSHelper
+	} else {
+		logrus.WithField("keychain", "MacOSKeychain").Warn("Keychain is not available.")
+	}
 
 	// Use MacOSKeychain by default.
-	defaultHelper = MacOSKeychain
+	return helpers, MacOSKeychain
 }
 
 func parseError(original error) error {
@@ -115,7 +119,7 @@ func (h *macOSHelper) Get(secretURL string) (string, string, error) {
 
 	results, err := keychain.QueryItem(query)
 	if err != nil {
-		l.WithError(err).Error("Querry item failed")
+		l.WithError(err).Error("Query item failed")
 		return "", "", parseError(err)
 	}
 

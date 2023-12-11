@@ -19,16 +19,18 @@ package user
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
-	"github.com/ProtonMail/gluon/connector"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/go-proton-api/server"
 	"github.com/ProtonMail/go-proton-api/server/backend"
-	"github.com/ProtonMail/proton-bridge/v3/internal/bridge/mocks"
 	"github.com/ProtonMail/proton-bridge/v3/internal/certs"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/imapservice"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/smtp"
+	"github.com/ProtonMail/proton-bridge/v3/internal/telemetry/mocks"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/ProtonMail/proton-bridge/v3/tests"
 	"github.com/golang/mock/gomock"
@@ -57,8 +59,12 @@ func TestUser_Info(t *testing.T) {
 				// User's name should be correct.
 				require.Equal(t, "username", user.Name())
 
-				// User's email should be correct.
+				// User's emails should be correct and their associated display names should be correct
 				require.ElementsMatch(t, []string{"username@" + s.GetDomain(), "alias@pm.me"}, user.Emails())
+				require.True(t, reflect.DeepEqual(map[string]string{
+					"username@" + s.GetDomain(): "username" + " (Display Name)",
+					"alias@pm.me":               "alias@pm.me (Display Name)",
+				}, user.DisplayNames()))
 
 				// By default, user should be in combined mode.
 				require.Equal(t, vault.CombinedMode, user.GetAddressMode())
@@ -70,101 +76,15 @@ func TestUser_Info(t *testing.T) {
 	})
 }
 
-func TestUser_Sync(t *testing.T) {
-	withAPI(t, context.Background(), func(ctx context.Context, s *server.Server, m *proton.Manager) {
-		withAccount(t, s, "username", "password", []string{}, func(string, []string) {
-			withUser(t, ctx, s, m, "username", "password", func(user *User) {
-				// User starts a sync at startup.
-				require.IsType(t, events.SyncStarted{}, <-user.GetEventCh())
-
-				// User sends sync progress.
-				require.IsType(t, events.SyncProgress{}, <-user.GetEventCh())
-
-				// User finishes a sync at startup.
-				require.IsType(t, events.SyncFinished{}, <-user.GetEventCh())
-			})
-		})
-	})
-}
-
 func TestUser_AddressMode(t *testing.T) {
 	withAPI(t, context.Background(), func(ctx context.Context, s *server.Server, m *proton.Manager) {
 		withAccount(t, s, "username", "password", []string{}, func(string, []string) {
 			withUser(t, ctx, s, m, "username", "password", func(user *User) {
-				// User finishes syncing at startup.
-				require.IsType(t, events.SyncStarted{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncProgress{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncFinished{}, <-user.GetEventCh())
-
 				// By default, user should be in combined mode.
 				require.Equal(t, vault.CombinedMode, user.GetAddressMode())
 
 				// User should be able to switch to split mode.
 				require.NoError(t, user.SetAddressMode(ctx, vault.SplitMode))
-
-				// Create a new set of IMAP connectors (after switching to split mode).
-				imapConn, err := user.NewIMAPConnectors()
-				require.NoError(t, err)
-
-				// Process updates from the new set of IMAP connectors.
-				for _, imapConn := range imapConn {
-					go func(imapConn connector.Connector) {
-						for update := range imapConn.GetUpdates() {
-							update.Done()
-						}
-					}(imapConn)
-				}
-
-				// User finishes syncing after switching to split mode.
-				require.IsType(t, events.SyncStarted{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncProgress{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncFinished{}, <-user.GetEventCh())
-			})
-		})
-	})
-}
-
-func TestUser_Deauth(t *testing.T) {
-	withAPI(t, context.Background(), func(ctx context.Context, s *server.Server, m *proton.Manager) {
-		withAccount(t, s, "username", "password", []string{}, func(string, []string) {
-			withUser(t, ctx, s, m, "username", "password", func(user *User) {
-				require.IsType(t, events.SyncStarted{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncProgress{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncFinished{}, <-user.GetEventCh())
-
-				// Revoke the user's auth token.
-				require.NoError(t, s.RevokeUser(user.ID()))
-
-				// The user should eventually be logged out.
-				require.Eventually(t, func() bool { _, ok := (<-user.GetEventCh()).(events.UserDeauth); return ok }, 500*time.Second, 100*time.Millisecond)
-			})
-		})
-	})
-}
-
-func TestUser_Refresh(t *testing.T) {
-	ctl := gomock.NewController(t)
-	mockReporter := mocks.NewMockReporter(ctl)
-
-	withAPI(t, context.Background(), func(ctx context.Context, s *server.Server, m *proton.Manager) {
-		withAccount(t, s, "username", "password", []string{}, func(string, []string) {
-			withUser(t, ctx, s, m, "username", "password", func(user *User) {
-				require.IsType(t, events.SyncStarted{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncProgress{}, <-user.GetEventCh())
-				require.IsType(t, events.SyncFinished{}, <-user.GetEventCh())
-
-				user.reporter = mockReporter
-
-				mockReporter.EXPECT().ReportMessageWithContext(
-					gomock.Eq("Warning: refresh occurred"),
-					mocks.NewRefreshContextMatcher(proton.RefreshAll),
-				).Return(nil)
-
-				// Send refresh event
-				require.NoError(t, s.RefreshUser(user.ID(), proton.RefreshAll))
-
-				// The user should eventually be re-synced.
-				require.Eventually(t, func() bool { _, ok := (<-user.GetEventCh()).(events.UserRefreshed); return ok }, 5*time.Second, 100*time.Millisecond)
 			})
 		})
 	})
@@ -183,12 +103,14 @@ func withAPI(_ testing.TB, ctx context.Context, fn func(context.Context, *server
 func withAccount(tb testing.TB, s *server.Server, username, password string, aliases []string, fn func(string, []string)) { //nolint:unparam
 	userID, addrID, err := s.CreateUser(username, []byte(password))
 	require.NoError(tb, err)
+	require.NoError(tb, s.ChangeAddressDisplayName(userID, addrID, username+" (Display Name)"))
 
 	addrIDs := []string{addrID}
 
 	for _, email := range aliases {
 		addrID, err := s.CreateAddress(userID, email, []byte(password))
 		require.NoError(tb, err)
+		require.NoError(tb, s.ChangeAddressDisplayName(userID, addrID, email+" (Display Name)"))
 
 		addrIDs = append(addrIDs, addrID)
 	}
@@ -209,27 +131,44 @@ func withUser(tb testing.TB, ctx context.Context, _ *server.Server, m *proton.Ma
 	saltedKeyPass, err := salts.SaltForKey([]byte(password), apiUser.Keys.Primary().ID)
 	require.NoError(tb, err)
 
-	vault, corrupt, err := vault.New(tb.TempDir(), tb.TempDir(), []byte("my secret key"))
+	v, corrupt, err := vault.New(tb.TempDir(), tb.TempDir(), []byte("my secret key"), nil)
 	require.NoError(tb, err)
-	require.False(tb, corrupt)
+	require.NoError(tb, corrupt)
 
-	vaultUser, err := vault.AddUser(apiUser.ID, username, apiAuth.UID, apiAuth.RefreshToken, saltedKeyPass)
+	vaultUser, err := v.AddUser(apiUser.ID, username, username+"@pm.me", apiAuth.UID, apiAuth.RefreshToken, saltedKeyPass)
 	require.NoError(tb, err)
 
-	user, err := New(ctx, vaultUser, client, nil, apiUser, nil, vault.SyncWorkers(), true)
+	ctl := gomock.NewController(tb)
+	defer ctl.Finish()
+
+	manager := mocks.NewMockHeartbeatManager(ctl)
+
+	manager.EXPECT().IsTelemetryAvailable(context.Background()).AnyTimes()
+
+	nullEventSubscription := events.NewNullSubscription()
+	nullIMAPServerManager := imapservice.NewNullIMAPServerManager()
+	nullSMTPServerManager := smtp.NewNullServerManager()
+
+	user, err := New(
+		ctx,
+		vaultUser,
+		client,
+		nil,
+		apiUser,
+		nil,
+		true,
+		vault.DefaultMaxSyncMemory,
+		tb.TempDir(),
+		manager,
+		nullIMAPServerManager,
+		nullSMTPServerManager,
+		nullEventSubscription,
+		nil,
+		"",
+		true,
+	)
 	require.NoError(tb, err)
 	defer user.Close()
-
-	imapConn, err := user.NewIMAPConnectors()
-	require.NoError(tb, err)
-
-	for _, imapConn := range imapConn {
-		go func(imapConn connector.Connector) {
-			for update := range imapConn.GetUpdates() {
-				update.Done()
-			}
-		}(imapConn)
-	}
 
 	fn(user)
 }

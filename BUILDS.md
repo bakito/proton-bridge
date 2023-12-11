@@ -3,20 +3,23 @@
 ## Prerequisites
 * 64-bit OS:
     - the go-rfc5322 module cannot currently be compiled for 32-bit OSes
-* Go 1.18
+* Go 1.20
 * Bash with basic build utils: make, gcc, sed, find, grep, ...
-  - For Windows it is recommended to use MinGW 64bit shell from [MSYS2](https://www.msys2.org/)
-* GCC (linux), msvc (windows) or Xcode (macOS)
-* Windres (windows)
-* libglvnd and libsecret development files (linux)
+  - For Windows, it is recommended to use MinGW 64bit shell from [MSYS2](https://www.msys2.org/)
+* GCC (Linux), msvc (Windows) or Xcode (macOS)
+* Windres (Windows)
+* libglvnd and libsecret development files (Linux)
+* pkg-config (Linux)
+* cmake, ninja-build and Qt 6.4.3 are required to build the graphical user interface. On Linux, 
+the Mesa OpenGL development files are also needed.
 
 To enable the sending of crash reports using Sentry please set the
-`main.DSNSentry` value with the client key of your sentry project before build.
+`DSN_SENTRY` environment variable with the client key of your sentry project before build.
 Otherwise, the sending of crash reports will be disabled.
 
 ## Build
 In order to build Bridge app with Qt interface we are using
-[Qt 6.3](https://doc.qt.io/qt-6/gettingstarted.html).
+[Qt 6.4.3](https://doc.qt.io/qt-6/gettingstarted.html).
 
 Please note that qmake path must be in your `PATH` to ensure Qt to be found.
 Also, before you start build **on Windows**, please unset the `MSYSTEM` variable
@@ -44,9 +47,10 @@ make build
 make build-nogui
 ```
 
-* Bridge without GUI will start by default without any interface (i.e., there is no way to add or remove client, get bridge password, etc)
-* Bridge always has the option (whether built with Qt or without) to use a CLI interface by starting it with the argument `-c`
-* NOTE: You still need to setup supported keychain on your system
+* To launch Bridge without GUI, you can invoke the `bridge` executable with one the following command-line switches:
+  * `--noninteractive` or `-n` to start Bridge without any interface (i.e., there is no way to add or remove client, get bridge password, etc.)
+  * `--cli` or `-c` to start Bridge with an interactive terminal interface.
+* NOTE: You still need to set up a supported keychain on your system.
 
 ## Launchers
 Launchers are only included in official distributions and provide the public

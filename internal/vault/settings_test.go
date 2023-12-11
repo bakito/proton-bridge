@@ -18,11 +18,15 @@
 package vault_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/updater"
+	"github.com/ProtonMail/proton-bridge/v3/internal/useragent"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/ports"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,7 +35,7 @@ func TestVault_Settings_IMAP(t *testing.T) {
 	s := newVault(t)
 
 	// Check the default IMAP port and SSL setting.
-	require.Equal(t, 1143, s.GetIMAPPort())
+	require.Equal(t, ports.FindFreePortFrom(1143), s.GetIMAPPort())
 	require.Equal(t, false, s.GetIMAPSSL())
 
 	// Modify the IMAP port and SSL setting.
@@ -48,7 +52,7 @@ func TestVault_Settings_SMTP(t *testing.T) {
 	s := newVault(t)
 
 	// Check the default SMTP port and SSL setting.
-	require.Equal(t, 1025, s.GetSMTPPort())
+	require.Equal(t, ports.FindFreePortFrom(1025), s.GetSMTPPort())
 	require.Equal(t, false, s.GetSMTPSSL())
 
 	// Modify the SMTP port and SSL setting.
@@ -62,18 +66,18 @@ func TestVault_Settings_SMTP(t *testing.T) {
 
 func TestVault_Settings_GluonDir(t *testing.T) {
 	// create a new test vault.
-	s, corrupt, err := vault.New(t.TempDir(), "/path/to/gluon", []byte("my secret key"))
+	s, corrupt, err := vault.New(t.TempDir(), "/path/to/gluon", []byte("my secret key"), async.NoopPanicHandler{})
 	require.NoError(t, err)
-	require.False(t, corrupt)
+	require.NoError(t, corrupt)
 
 	// Check the default gluon dir.
-	require.Equal(t, "/path/to/gluon", s.GetGluonDir())
+	require.Equal(t, "/path/to/gluon", s.GetGluonCacheDir())
 
 	// Modify the gluon dir.
 	require.NoError(t, s.SetGluonDir("/tmp/gluon"))
 
 	// Check the new gluon dir.
-	require.Equal(t, "/tmp/gluon", s.GetGluonDir())
+	require.Equal(t, "/tmp/gluon", s.GetGluonCacheDir())
 }
 
 func TestVault_Settings_UpdateChannel(t *testing.T) {
@@ -103,6 +107,10 @@ func TestVault_Settings_UpdateRollout(t *testing.T) {
 
 	// Check the new update rollout.
 	require.Equal(t, float64(0.5), s.GetUpdateRollout())
+
+	// Since GODT-2319 0.6046602879796196 is not allowed as a rollout value (RNG was not seeded)
+	require.NoError(t, s.SetUpdateRollout(vault.ForbiddenRollout))
+	require.GreaterOrEqual(t, math.Abs(s.GetUpdateRollout()-vault.ForbiddenRollout), 0.00000001)
 }
 
 func TestVault_Settings_ColorScheme(t *testing.T) {
@@ -145,6 +153,20 @@ func TestVault_Settings_ShowAllMail(t *testing.T) {
 
 	// Check the new show all mail setting.
 	require.Equal(t, false, s.GetShowAllMail())
+}
+
+func TestVault_Settings_TelemetryDisabled(t *testing.T) {
+	// create a new test vault.
+	s := newVault(t)
+
+	// Check the default show all mail setting.
+	require.Equal(t, false, s.GetTelemetryDisabled())
+
+	// Modify the show all mail setting.
+	require.NoError(t, s.SetTelemetryDisabled(true))
+
+	// Check the new show all mail setting.
+	require.Equal(t, true, s.GetTelemetryDisabled())
 }
 
 func TestVault_Settings_Autostart(t *testing.T) {
@@ -203,25 +225,45 @@ func TestVault_Settings_FirstStart(t *testing.T) {
 	require.Equal(t, false, s.GetFirstStart())
 }
 
-func TestVault_Settings_FirstStartGUI(t *testing.T) {
+func TestVault_Settings_MaxSyncMemory(t *testing.T) {
 	// create a new test vault.
 	s := newVault(t)
 
 	// Check the default first start value.
-	require.Equal(t, true, s.GetFirstStartGUI())
-
-	// Modify the first start value.
-	require.NoError(t, s.SetFirstStartGUI(false))
-
-	// Check the new first start value.
-	require.Equal(t, false, s.GetFirstStartGUI())
+	require.Equal(t, vault.DefaultMaxSyncMemory, s.GetMaxSyncMemory())
 }
 
-func TestVault_Settings_SyncWorkers(t *testing.T) {
+func TestVault_Settings_LastUserAgent(t *testing.T) {
 	// create a new test vault.
 	s := newVault(t)
 
-	syncWorkers := vault.GetDefaultSyncWorkerCount()
-	require.Equal(t, syncWorkers, s.SyncWorkers())
-	require.Equal(t, syncWorkers, s.SyncAttPool())
+	// Check the default first start value.
+	require.Equal(t, useragent.DefaultUserAgent, s.GetLastUserAgent())
+}
+
+func Test_Settings_PasswordArchive(t *testing.T) {
+	// Create a new test vault.
+	s := newVault(t)
+
+	// The store should have no users.
+	require.Empty(t, s.GetUserIDs())
+
+	// Create a new user.
+	user, err := s.AddUser("userID1", "username1", "username1@pm.me", "authUID1", "authRef1", []byte("keyPass1"))
+	require.NoError(t, err)
+	bridgePass := user.BridgePass()
+
+	// Remove the user.
+	require.NoError(t, user.Close())
+	require.NoError(t, s.DeleteUser("userID1"))
+
+	// Add a different user. Another password is generated.
+	user, err = s.AddUser("userID2", "username2", "username2@pm.me", "authUID2", "authRef2", []byte("keyPass2"))
+	require.NoError(t, err)
+	require.NotEqual(t, user.BridgePass(), bridgePass)
+
+	// Add the first user again. The password is restored.
+	user, err = s.AddUser("userID1", "username1", "username1@pm.me", "authUID1", "authRef1", []byte("keyPass1"))
+	require.NoError(t, err)
+	require.Equal(t, user.BridgePass(), bridgePass)
 }

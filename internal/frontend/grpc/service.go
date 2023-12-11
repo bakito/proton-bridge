@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,11 +33,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/certs"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
+	"github.com/ProtonMail/proton-bridge/v3/internal/service"
 	"github.com/ProtonMail/proton-bridge/v3/internal/updater"
 	"github.com/bradenaw/juniper/xslices"
 	"github.com/elastic/go-sysinfo"
@@ -51,8 +54,9 @@ import (
 )
 
 const (
-	serverConfigFileName   = "grpcServerConfig.json"
-	serverTokenMetadataKey = "server-token"
+	serverConfigFileName        = "grpcServerConfig.json"
+	serverTokenMetadataKey      = "server-token"
+	twoPasswordsMaxAttemptCount = 3 // The number of attempts allowed for the mailbox password.
 )
 
 // Service is the RPC service struct.
@@ -67,7 +71,7 @@ type Service struct { // nolint:structcheck
 	eventQueue         []*StreamEvent
 	eventQueueMutex    sync.Mutex
 
-	panicHandler CrashHandler
+	panicHandler async.PanicHandler
 	restarter    Restarter
 	bridge       *bridge.Bridge
 	eventCh      <-chan events.Event
@@ -79,9 +83,10 @@ type Service struct { // nolint:structcheck
 	target     updater.VersionInfo
 	targetLock safe.RWMutex
 
-	authClient *proton.Client
-	auth       proton.Auth
-	password   []byte
+	authClient              *proton.Client
+	auth                    proton.Auth
+	password                []byte
+	twoPasswordAttemptCount int
 
 	log                *logrus.Entry
 	initializing       sync.WaitGroup
@@ -93,12 +98,10 @@ type Service struct { // nolint:structcheck
 }
 
 // NewService returns a new instance of the service.
-//
-// nolint:funlen
 func NewService(
-	panicHandler CrashHandler,
+	panicHandler async.PanicHandler,
 	restarter Restarter,
-	locations Locator,
+	locations service.Locator,
 	bridge *bridge.Bridge,
 	eventCh <-chan events.Event,
 	quitCh <-chan struct{},
@@ -110,7 +113,7 @@ func NewService(
 		logrus.WithError(err).Panic("Could not generate gRPC TLS config")
 	}
 
-	config := Config{
+	config := service.Config{
 		Cert:  string(certPEM),
 		Token: uuid.NewString(),
 	}
@@ -141,7 +144,7 @@ func NewService(
 		config.Port = address.Port
 	}
 
-	if path, err := saveGRPCServerConfigFile(locations, &config); err != nil {
+	if path, err := service.SaveGRPCServerConfigFile(locations, &config, serverConfigFileName); err != nil {
 		logrus.WithError(err).WithField("path", path).Panic("Could not write gRPC service config file")
 	} else {
 		logrus.WithField("path", path).Info("Successfully saved gRPC service config file")
@@ -207,15 +210,14 @@ func (s *Service) Loop() error {
 	if s.parentPID < 0 {
 		s.log.Info("Not monitoring parent PID")
 	} else {
-		go s.monitorParentPID()
+		go func() {
+			defer async.HandlePanic(s.panicHandler)
+			s.monitorParentPID()
+		}()
 	}
 
-	defer func() {
-		_ = s.bridge.SetFirstStartGUI(false)
-	}()
-
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 		s.watchEvents()
 	}()
 
@@ -225,6 +227,8 @@ func (s *Service) Loop() error {
 	defer close(doneCh)
 
 	go func() {
+		defer async.HandlePanic(s.panicHandler)
+
 		select {
 		case <-s.quitCh:
 			s.log.Info("Stopping gRPC server")
@@ -249,7 +253,7 @@ func (s *Service) WaitUntilFrontendIsReady() {
 	s.initializing.Wait()
 }
 
-// nolint:funlen,gocyclo
+// nolint:gocyclo
 func (s *Service) watchEvents() {
 	// GODT-1949 Better error events.
 	for _, err := range s.bridge.GetErrors() {
@@ -259,12 +263,6 @@ func (s *Service) watchEvents() {
 
 		case errors.Is(err, bridge.ErrVaultInsecure):
 			_ = s.SendEvent(NewKeychainHasNoKeychainEvent())
-
-		case errors.Is(err, bridge.ErrServeIMAP):
-			_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_IMAP_PORT_STARTUP_ERROR))
-
-		case errors.Is(err, bridge.ErrServeSMTP):
-			_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_SMTP_PORT_STARTUP_ERROR))
 		}
 	}
 
@@ -276,14 +274,23 @@ func (s *Service) watchEvents() {
 		case events.ConnStatusDown:
 			_ = s.SendEvent(NewInternetStatusEvent(false))
 
+		case events.IMAPServerError:
+			_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_IMAP_PORT_STARTUP_ERROR))
+
+		case events.SMTPServerError:
+			_ = s.SendEvent(NewMailServerSettingsErrorEvent(MailServerSettingsErrorType_SMTP_PORT_STARTUP_ERROR))
+
 		case events.Raise:
 			_ = s.SendEvent(NewShowMainWindowEvent())
 
 		case events.UserAddressCreated:
 			_ = s.SendEvent(NewMailAddressChangeEvent(event.Email))
 
-		case events.UserAddressUpdated:
+		case events.UserAddressEnabled:
 			_ = s.SendEvent(NewMailAddressChangeEvent(event.Email))
+
+		case events.UserAddressDisabled:
+			_ = s.SendEvent(NewMailAddressChangeLogoutEvent(event.Email))
 
 		case events.UserAddressDeleted:
 			_ = s.SendEvent(NewMailAddressChangeLogoutEvent(event.Email))
@@ -309,14 +316,37 @@ func (s *Service) watchEvents() {
 		case events.AddressModeChanged:
 			_ = s.SendEvent(NewUserChangedEvent(event.UserID))
 
+		case events.UsedSpaceChanged:
+			_ = s.SendEvent(NewUsedBytesChangedEvent(event.UserID, event.UsedSpace))
+
+		case events.IMAPLoginFailed:
+			_ = s.SendEvent(newIMAPLoginFailedEvent(event.Username))
+
 		case events.UserDeauth:
 			// This is the event the GUI cares about.
 			_ = s.SendEvent(NewUserChangedEvent(event.UserID))
 
-			// The GUI doesn't care about this event... not sure why we still emit it.
+			// The GUI doesn't care about this event... not sure why we still emit it. GODT-2128.
 			if user, err := s.bridge.GetUserInfo(event.UserID); err == nil {
 				_ = s.SendEvent(NewUserDisconnectedEvent(user.Username))
 			}
+
+		case events.UserBadEvent:
+			_ = s.SendEvent(NewUserBadEvent(event.UserID, event.Error.Error()))
+
+		case events.SyncStarted:
+			_ = s.SendEvent(NewSyncStartedEvent(event.UserID))
+
+		case events.SyncFinished:
+			_ = s.SendEvent(NewSyncFinishedEvent(event.UserID))
+
+		case events.SyncFailed:
+			if errors.Is(event.Error, context.Canceled) {
+				_ = s.SendEvent(NewSyncFinishedEvent(event.UserID))
+			}
+
+		case events.SyncProgress:
+			_ = s.SendEvent(NewSyncProgressEvent(event.UserID, event.Progress, event.Elapsed.Milliseconds(), event.Remaining.Milliseconds()))
 
 		case events.UpdateLatest:
 			safe.RLock(func() {
@@ -385,7 +415,12 @@ func (s *Service) loginClean() {
 }
 
 func (s *Service) finishLogin() {
-	defer s.loginClean()
+	performCleanup := true
+	defer func() {
+		if performCleanup {
+			s.loginClean()
+		}
+	}()
 
 	wasSignedOut := s.bridge.HasUser(s.auth.UserID)
 
@@ -403,10 +438,24 @@ func (s *Service) finishLogin() {
 	eventCh, done := s.bridge.GetEvents(events.UserLoggedIn{})
 	defer done()
 
-	userID, err := s.bridge.LoginUser(context.Background(), s.authClient, s.auth, s.password)
+	ctx := context.Background()
+	userID, err := s.bridge.LoginUser(ctx, s.authClient, s.auth, s.password)
 	if err != nil {
 		s.log.WithError(err).Errorf("Finish login failed")
-		_ = s.SendEvent(NewLoginError(LoginErrorType_TWO_PASSWORDS_ABORT, err.Error()))
+		s.twoPasswordAttemptCount++
+		errType := LoginErrorType_TWO_PASSWORDS_ABORT
+		if errors.Is(err, bridge.ErrFailedToUnlock) {
+			if s.twoPasswordAttemptCount < twoPasswordsMaxAttemptCount {
+				performCleanup = false
+				errType = LoginErrorType_TWO_PASSWORDS_ERROR
+			} else {
+				if deleteErr := s.authClient.AuthDelete(ctx); deleteErr != nil {
+					s.log.WithError(deleteErr).Error("Failed to delete auth")
+				}
+			}
+		}
+
+		_ = s.SendEvent(NewLoginError(errType, err.Error()))
 		return
 	}
 
@@ -482,17 +531,6 @@ func newTLSConfig() (*tls.Config, []byte, error) {
 	}, certPEM, nil
 }
 
-func saveGRPCServerConfigFile(locations Locator, config *Config) (string, error) {
-	settingsPath, err := locations.ProvideSettingsPath()
-	if err != nil {
-		return "", err
-	}
-
-	configPath := filepath.Join(settingsPath, serverConfigFileName)
-
-	return configPath, config.save(configPath)
-}
-
 // validateServerToken verify that the server token provided by the client is valid.
 func validateServerToken(ctx context.Context, wantToken string) error {
 	values, ok := metadata.FromIncomingContext(ctx)
@@ -561,6 +599,8 @@ func (s *Service) monitorParentPID() {
 				s.log.Info("Parent process does not exist anymore. Initiating shutdown")
 				// quit will write to the parentPIDDoneCh, so we launch a goroutine.
 				go func() {
+					defer async.HandlePanic(s.panicHandler)
+
 					if err := s.quit(); err != nil {
 						logrus.WithError(err).Error("Error on quit")
 					}
@@ -578,10 +618,17 @@ func (s *Service) monitorParentPID() {
 func computeFileSocketPath() (string, error) {
 	tempPath := os.TempDir()
 	for i := 0; i < 1000; i++ {
-		path := filepath.Join(tempPath, fmt.Sprintf("bridge_%v.sock", uuid.NewString()))
+		path := filepath.Join(tempPath, fmt.Sprintf("bridge%04d", rand.Intn(10000))) // nolint:gosec
 		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 			return path, nil
 		}
+
+		if err := os.Remove(path); err != nil {
+			logrus.WithField("path", path).WithError(err).Warning("Could not remove existing socket file")
+			continue
+		}
+
+		return path, nil
 	}
 
 	return "", errors.New("unable to find a suitable file socket in user config folder")

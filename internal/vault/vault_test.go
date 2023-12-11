@@ -22,7 +22,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/ports"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,21 +32,21 @@ func TestVault_Corrupt(t *testing.T) {
 	vaultDir, gluonDir := t.TempDir(), t.TempDir()
 
 	{
-		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"))
+		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"), async.NoopPanicHandler{})
 		require.NoError(t, err)
-		require.False(t, corrupt)
+		require.NoError(t, corrupt)
 	}
 
 	{
-		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"))
+		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"), async.NoopPanicHandler{})
 		require.NoError(t, err)
-		require.False(t, corrupt)
+		require.NoError(t, corrupt)
 	}
 
 	{
-		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("bad key"))
+		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("bad key"), async.NoopPanicHandler{})
 		require.NoError(t, err)
-		require.True(t, corrupt)
+		require.ErrorIs(t, corrupt, vault.ErrDecryptFailed)
 	}
 }
 
@@ -52,15 +54,15 @@ func TestVault_Corrupt_JunkData(t *testing.T) {
 	vaultDir, gluonDir := t.TempDir(), t.TempDir()
 
 	{
-		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"))
+		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"), async.NoopPanicHandler{})
 		require.NoError(t, err)
-		require.False(t, corrupt)
+		require.NoError(t, corrupt)
 	}
 
 	{
-		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"))
+		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"), async.NoopPanicHandler{})
 		require.NoError(t, err)
-		require.False(t, corrupt)
+		require.NoError(t, corrupt)
 	}
 
 	{
@@ -71,9 +73,9 @@ func TestVault_Corrupt_JunkData(t *testing.T) {
 		_, err = f.Write([]byte("junk data"))
 		require.NoError(t, err)
 
-		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"))
+		_, corrupt, err := vault.New(vaultDir, gluonDir, []byte("my secret key"), async.NoopPanicHandler{})
 		require.NoError(t, err)
-		require.True(t, corrupt)
+		require.ErrorIs(t, corrupt, vault.ErrUnmarshal)
 	}
 }
 
@@ -89,19 +91,19 @@ func TestVault_Reset(t *testing.T) {
 	require.Equal(t, 5678, s.GetSMTPPort())
 
 	// Reset.
-	require.NoError(t, s.Reset(s.GetGluonDir()))
+	require.NoError(t, s.Reset(s.GetGluonCacheDir()))
 
 	// The data is gone.
-	require.Equal(t, 1143, s.GetIMAPPort())
-	require.Equal(t, 1025, s.GetSMTPPort())
+	require.Equal(t, ports.FindFreePortFrom(1143), s.GetIMAPPort())
+	require.Equal(t, ports.FindFreePortFrom(1025), s.GetSMTPPort())
 }
 
 func newVault(t *testing.T) *vault.Vault {
 	t.Helper()
 
-	s, corrupt, err := vault.New(t.TempDir(), t.TempDir(), []byte("my secret key"))
+	s, corrupt, err := vault.New(t.TempDir(), t.TempDir(), []byte("my secret key"), async.NoopPanicHandler{})
 	require.NoError(t, err)
-	require.False(t, corrupt)
+	require.NoError(t, corrupt)
 
 	return s
 }

@@ -19,24 +19,29 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/cookies"
 	"github.com/ProtonMail/proton-bridge/v3/internal/crash"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/focus"
+	"github.com/ProtonMail/proton-bridge/v3/internal/frontend/theme"
 	"github.com/ProtonMail/proton-bridge/v3/internal/locations"
 	"github.com/ProtonMail/proton-bridge/v3/internal/logging"
 	"github.com/ProtonMail/proton-bridge/v3/internal/sentry"
 	"github.com/ProtonMail/proton-bridge/v3/internal/useragent"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/restarter"
 	"github.com/pkg/profile"
 	"github.com/sirupsen/logrus"
@@ -47,6 +52,9 @@ import (
 const (
 	flagCPUProfile      = "cpu-prof"
 	flagCPUProfileShort = "p"
+
+	flagTraceProfile      = "trace-prof"
+	flagTraceProfileShort = "t"
 
 	flagMemProfile      = "mem-prof"
 	flagMemProfileShort = "m"
@@ -73,13 +81,15 @@ const (
 	flagNoWindow         = "no-window"
 	flagParentPID        = "parent-pid"
 	flagSoftwareRenderer = "software-renderer"
+	flagSessionID        = "session-id"
 )
 
 const (
-	appUsage = "Proton Mail IMAP and SMTP Bridge"
+	appUsage     = "Proton Mail IMAP and SMTP Bridge"
+	appShortName = "bridge"
 )
 
-func New() *cli.App { //nolint:funlen
+func New() *cli.App {
 	app := cli.NewApp()
 
 	app.Name = constants.FullAppName
@@ -89,6 +99,11 @@ func New() *cli.App { //nolint:funlen
 			Name:    flagCPUProfile,
 			Aliases: []string{flagCPUProfileShort},
 			Usage:   "Generate CPU profile",
+		},
+		&cli.BoolFlag{
+			Name:    flagTraceProfile,
+			Aliases: []string{flagTraceProfileShort},
+			Usage:   "Generate Trace profile",
 		},
 		&cli.BoolFlag{
 			Name:    flagMemProfile,
@@ -147,6 +162,10 @@ func New() *cli.App { //nolint:funlen
 			Hidden: true,
 			Value:  false,
 		},
+		&cli.StringFlag{
+			Name:   flagSessionID,
+			Hidden: true,
+		},
 	}
 
 	app.Action = run
@@ -154,7 +173,7 @@ func New() *cli.App { //nolint:funlen
 	return app
 }
 
-func run(c *cli.Context) error { //nolint:funlen
+func run(c *cli.Context) error {
 	// Get the current bridge version.
 	version, err := semver.NewVersion(constants.Version)
 	if err != nil {
@@ -165,7 +184,7 @@ func run(c *cli.Context) error { //nolint:funlen
 	identifier := useragent.New()
 
 	// Create a new Sentry client that will be used to report crashes etc.
-	reporter := sentry.NewReporter(constants.FullAppName, constants.Version, identifier)
+	reporter := sentry.NewReporter(constants.FullAppName, identifier)
 
 	// Determine the exe that should be used to restart/autostart the app.
 	// By default, this is the launcher, if used. Otherwise, we try to get
@@ -180,14 +199,19 @@ func run(c *cli.Context) error { //nolint:funlen
 		exe = os.Args[0]
 	}
 
-	migrationErr := migrateOldVersions()
+	var logCloser io.Closer
+	defer func() {
+		_ = logging.Close(logCloser)
+	}()
 
-	// Run with profiling if requested.
-	return withProfiler(c, func() error {
-		// Restart the app if requested.
-		return withRestarter(exe, func(restarter *restarter.Restarter) error {
-			// Handle crashes with various actions.
-			return withCrashHandler(restarter, reporter, func(crashHandler *crash.Handler, quitCh <-chan struct{}) error {
+	// Restart the app if requested.
+	err = withRestarter(exe, func(restarter *restarter.Restarter) error {
+		// Handle crashes with various actions.
+		return withCrashHandler(restarter, reporter, func(crashHandler *crash.Handler, quitCh <-chan struct{}) error {
+			migrationErr := migrateOldVersions()
+
+			// Run with profiling if requested.
+			return withProfiler(c, func() error {
 				// Load the locations where we store our files.
 				return WithLocations(func(locations *locations.Locations) error {
 					// Migrate the keychain helper.
@@ -196,49 +220,71 @@ func run(c *cli.Context) error { //nolint:funlen
 					}
 
 					// Initialize logging.
-					return withLogging(c, crashHandler, locations, func() error {
+					return withLogging(c, crashHandler, locations, func(closer io.Closer) error {
+						logCloser = closer
+
 						// If there was an error during migration, log it now.
 						if migrationErr != nil {
 							logrus.WithError(migrationErr).Error("Failed to migrate old app data")
 						}
 
 						// Ensure we are the only instance running.
-						return withSingleInstance(locations, version, func() error {
-							// Unlock the encrypted vault.
-							return WithVault(locations, func(vault *vault.Vault, insecure, corrupt bool) error {
-								if !vault.Migrated() {
-									// Migrate old settings into the vault.
-									if err := migrateOldSettings(vault); err != nil {
-										logrus.WithError(err).Error("Failed to migrate old settings")
-									}
+						settings, err := locations.ProvideSettingsPath()
+						if err != nil {
+							logrus.WithError(err).Error("Failed to get settings path")
+						}
 
-									// Migrate old accounts into the vault.
-									if err := migrateOldAccounts(locations, vault); err != nil {
-										logrus.WithError(err).Error("Failed to migrate old accounts")
-									}
-
-									// The vault has been migrated.
-									if err := vault.SetMigrated(); err != nil {
-										logrus.WithError(err).Error("Failed to mark vault as migrated")
-									}
-								}
-
-								// Load the cookies from the vault.
-								return withCookieJar(vault, func(cookieJar http.CookieJar) error {
-									// Create a new bridge instance.
-									return withBridge(c, exe, locations, version, identifier, crashHandler, reporter, vault, cookieJar, func(b *bridge.Bridge, eventCh <-chan events.Event) error {
-										if insecure {
-											logrus.Warn("The vault key could not be retrieved; the vault will not be encrypted")
-											b.PushError(bridge.ErrVaultInsecure)
+						return withSingleInstance(settings, locations.GetLockFile(), version, func() error {
+							// Look for available keychains
+							return WithKeychainList(func(keychains *keychain.List) error {
+								// Unlock the encrypted vault.
+								return WithVault(locations, keychains, crashHandler, func(v *vault.Vault, insecure, corrupt bool) error {
+									if !v.Migrated() {
+										// Migrate old settings into the vault.
+										if err := migrateOldSettings(v); err != nil {
+											logrus.WithError(err).Error("Failed to migrate old settings")
 										}
 
-										if corrupt {
-											logrus.Warn("The vault is corrupt and has been wiped")
-											b.PushError(bridge.ErrVaultCorrupt)
+										// Migrate old accounts into the vault.
+										if err := migrateOldAccounts(locations, keychains, v); err != nil {
+											logrus.WithError(err).Error("Failed to migrate old accounts")
 										}
 
-										// Run the frontend.
-										return runFrontend(c, crashHandler, restarter, locations, b, eventCh, quitCh, c.Int(flagParentPID))
+										// The vault has been migrated.
+										if err := v.SetMigrated(); err != nil {
+											logrus.WithError(err).Error("Failed to mark vault as migrated")
+										}
+									}
+
+									logrus.WithFields(logrus.Fields{
+										"lastVersion": v.GetLastVersion().String(),
+										"showAllMail": v.GetShowAllMail(),
+										"updateCh":    v.GetUpdateChannel(),
+										"autoUpdate":  v.GetAutoUpdate(),
+										"rollout":     v.GetUpdateRollout(),
+										"DoH":         v.GetProxyAllowed(),
+									}).Info("Vault loaded")
+
+									// Load the cookies from the vault.
+									return withCookieJar(v, func(cookieJar http.CookieJar) error {
+										// Create a new bridge instance.
+										return withBridge(c, exe, locations, version, identifier, crashHandler, reporter, v, cookieJar, keychains, func(b *bridge.Bridge, eventCh <-chan events.Event) error {
+											if insecure {
+												logrus.Warn("The vault key could not be retrieved; the vault will not be encrypted")
+												b.PushError(bridge.ErrVaultInsecure)
+											}
+
+											if corrupt {
+												logrus.Warn("The vault is corrupt and has been wiped")
+												b.PushError(bridge.ErrVaultCorrupt)
+											}
+
+											// Remove old updates files
+											b.RemoveOldUpdates()
+
+											// Run the frontend.
+											return runFrontend(c, crashHandler, restarter, locations, b, eventCh, quitCh, c.Int(flagParentPID))
+										})
 									})
 								})
 							})
@@ -248,18 +294,25 @@ func run(c *cli.Context) error { //nolint:funlen
 			})
 		})
 	})
+
+	// if an error occurs, it must be logged now because we're about to close the log file.
+	if err != nil {
+		logrus.Fatal(err)
+	}
+
+	return err
 }
 
 // If there's another instance already running, try to raise it and exit.
-func withSingleInstance(locations *locations.Locations, version *semver.Version, fn func() error) error {
+func withSingleInstance(settingPath, lockFile string, version *semver.Version, fn func() error) error {
 	logrus.Debug("Checking for other instances")
 	defer logrus.Debug("Single instance stopped")
 
-	lock, err := checkSingleInstance(locations.GetLockFile(), version)
+	lock, err := checkSingleInstance(settingPath, lockFile, version)
 	if err != nil {
 		logrus.Info("Another instance is already running; raising it")
 
-		if ok := focus.TryRaise(); !ok {
+		if ok := focus.TryRaise(settingPath); !ok {
 			return fmt.Errorf("another instance is already running but it could not be raised")
 		}
 
@@ -278,7 +331,7 @@ func withSingleInstance(locations *locations.Locations, version *semver.Version,
 }
 
 // Initialize our logging system.
-func withLogging(c *cli.Context, crashHandler *crash.Handler, locations *locations.Locations, fn func() error) error {
+func withLogging(c *cli.Context, crashHandler *crash.Handler, locations *locations.Locations, fn func(closer io.Closer) error) error {
 	logrus.Debug("Initializing logging")
 	defer logrus.Debug("Logging stopped")
 
@@ -291,23 +344,34 @@ func withLogging(c *cli.Context, crashHandler *crash.Handler, locations *locatio
 	logrus.WithField("path", logsPath).Debug("Received logs path")
 
 	// Initialize logging.
-	if err := logging.Init(logsPath, c.String(flagLogLevel)); err != nil {
+	sessionID := logging.NewSessionIDFromString(c.String(flagSessionID))
+	var closer io.Closer
+	if closer, err = logging.Init(
+		logsPath,
+		sessionID,
+		logging.BridgeShortAppName,
+		logging.DefaultMaxLogFileSize,
+		logging.DefaultPruningSize,
+		c.String(flagLogLevel),
+	); err != nil {
 		return fmt.Errorf("could not initialize logging: %w", err)
 	}
 
 	// Ensure we dump a stack trace if we crash.
-	crashHandler.AddRecoveryAction(logging.DumpStackTrace(logsPath))
+	crashHandler.AddRecoveryAction(logging.DumpStackTrace(logsPath, sessionID, appShortName))
 
 	logrus.
 		WithField("appName", constants.FullAppName).
 		WithField("version", constants.Version).
 		WithField("revision", constants.Revision).
+		WithField("tag", constants.Tag).
 		WithField("build", constants.BuildTime).
 		WithField("runtime", runtime.GOOS).
 		WithField("args", os.Args).
+		WithField("SentryID", sentry.GetProtectedHostname()).
 		Info("Run app")
 
-	return fn()
+	return fn(closer)
 }
 
 // WithLocations provides access to locations where we store our files.
@@ -322,14 +386,7 @@ func WithLocations(fn func(*locations.Locations) error) error {
 	}
 
 	// Create a new locations object that will be used to provide paths to store files.
-	locations := locations.New(provider, constants.ConfigName)
-	defer func() {
-		if err := locations.Clean(); err != nil {
-			logrus.WithError(err).Error("Failed to clean locations")
-		}
-	}()
-
-	return fn(locations)
+	return fn(locations.New(provider, constants.ConfigName))
 }
 
 // Start profiling if requested.
@@ -339,6 +396,11 @@ func withProfiler(c *cli.Context, fn func() error) error {
 	if c.Bool(flagCPUProfile) {
 		logrus.Debug("Running with CPU profiling")
 		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+	}
+
+	if c.Bool(flagTraceProfile) {
+		logrus.Debug("Running with Trace profiling")
+		defer profile.Start(profile.TraceProfile, profile.ProfilePath(".")).Stop()
 	}
 
 	if c.Bool(flagMemProfile) {
@@ -366,7 +428,7 @@ func withCrashHandler(restarter *restarter.Restarter, reporter *sentry.Reporter,
 	defer logrus.Debug("Crash handler stopped")
 
 	crashHandler := crash.NewHandler(crash.ShowErrorNotification(constants.FullAppName))
-	defer crashHandler.HandlePanic()
+	defer async.HandlePanic(crashHandler)
 
 	// On crash, send crash report to Sentry.
 	crashHandler.AddRecoveryAction(reporter.ReportException)
@@ -403,6 +465,10 @@ func withCookieJar(vault *vault.Vault, fn func(http.CookieJar) error) error {
 		return fmt.Errorf("could not create cookie jar: %w", err)
 	}
 
+	if err := setDeviceCookies(persister); err != nil {
+		return fmt.Errorf("could not set device cookies: %w", err)
+	}
+
 	// Persist the cookies to the vault when we close.
 	defer func() {
 		logrus.Debug("Persisting cookies")
@@ -413,4 +479,29 @@ func withCookieJar(vault *vault.Vault, fn func(http.CookieJar) error) error {
 	}()
 
 	return fn(persister)
+}
+
+// WithKeychainList init the list of usable keychains.
+func WithKeychainList(fn func(*keychain.List) error) error {
+	logrus.Debug("Creating keychain list")
+	defer logrus.Debug("Keychain list stop")
+	return fn(keychain.NewList())
+}
+
+func setDeviceCookies(jar *cookies.Jar) error {
+	url, err := url.Parse(constants.APIHost)
+	if err != nil {
+		return err
+	}
+
+	for name, value := range map[string]string{
+		"hhn": sentry.GetProtectedHostname(),
+		"tz":  sentry.GetTimeZone(),
+		"lng": sentry.GetSystemLang(),
+		"clr": string(theme.DefaultTheme()),
+	} {
+		jar.SetCookies(url, []*http.Cookie{{Name: name, Value: value, Secure: true}})
+	}
+
+	return nil
 }

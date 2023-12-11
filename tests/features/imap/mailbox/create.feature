@@ -7,10 +7,12 @@ Feature: IMAP create mailbox
       | f2   | folder |
       | l1   | label  |
       | l2   | label  |
-    And bridge starts
+    Then it succeeds
+    When bridge starts
     And the user logs in with username "[user:user]" and password "password"
     And user "[user:user]" finishes syncing
     And user "[user:user]" connects and authenticates IMAP client "1"
+    Then it succeeds
 
   Scenario: Create folder
     When IMAP client "1" creates "Folders/mbox"
@@ -37,7 +39,7 @@ Feature: IMAP create mailbox
     Then it succeeds
     When IMAP client "1" creates "Labels/l3"
     Then it succeeds
-    Then IMAP client "1" sees the following mailbox info:
+    Then IMAP client "1" eventually sees the following mailbox info:
       | name       |
       | INBOX      |
       | Drafts     |
@@ -65,7 +67,7 @@ Feature: IMAP create mailbox
     Then it succeeds
     When IMAP client "1" creates "Folders/f2/f22"
     Then it succeeds
-    Then IMAP client "1" sees the following mailbox info:
+    Then IMAP client "1" eventually sees the following mailbox info:
       | name           |
       | INBOX          |
       | Drafts         |
@@ -89,7 +91,7 @@ Feature: IMAP create mailbox
     And the user logs in with username "[user:user]" and password "password"
     And user "[user:user]" finishes syncing
     And user "[user:user]" connects and authenticates IMAP client "2"
-    Then IMAP client "2" sees the following mailbox info:
+    Then IMAP client "2" eventually sees the following mailbox info:
       | name           |
       | INBOX          |
       | Drafts         |
@@ -119,7 +121,7 @@ Feature: IMAP create mailbox
     Then it succeeds
     When IMAP client "1" creates "Folders/f2/f22"
     Then it succeeds
-    Then IMAP client "1" sees the following mailbox info:
+    Then IMAP client "1" eventually sees the following mailbox info:
       | name           |
       | INBOX          |
       | Drafts         |
@@ -143,7 +145,7 @@ Feature: IMAP create mailbox
     Then it succeeds
     When IMAP client "1" renames "Folders/f1/f12" to "Folders/f2/f12"
     Then it succeeds
-    Then IMAP client "1" sees the following mailbox info:
+    Then IMAP client "1" eventually sees the following mailbox info:
       | name           |
       | INBOX          |
       | Drafts         |
@@ -167,7 +169,7 @@ Feature: IMAP create mailbox
     And the user logs in with username "[user:user]" and password "password"
     And user "[user:user]" finishes syncing
     And user "[user:user]" connects and authenticates IMAP client "2"
-    Then IMAP client "2" sees the following mailbox info:
+    Then IMAP client "2" eventually sees the following mailbox info:
       | name           |
       | INBOX          |
       | Drafts         |

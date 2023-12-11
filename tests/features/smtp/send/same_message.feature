@@ -2,7 +2,8 @@ Feature: SMTP sending the same message twice
   Background:
     Given there exists an account with username "[user:user]" and password "password"
     And there exists an account with username "[user:to]" and password "password"
-    And bridge starts
+    Then it succeeds
+    When bridge starts
     And the user logs in with username "[user:user]" and password "password"
     And the user logs in with username "[user:to]" and password "password"
     And user "[user:user]" connects and authenticates SMTP client "1"
@@ -16,6 +17,7 @@ Feature: SMTP sending the same message twice
       """
     And it succeeds
 
+  @long-black
   Scenario: The exact same message is not sent twice
     When SMTP client "1" sends the following message from "[user:user]@[domain]" to "[user:to]@[domain]":
       """
@@ -36,6 +38,7 @@ Feature: SMTP sending the same message twice
       | [user:user]@[domain] | [user:to]@[domain] | Hello   | World |
 
 
+  @long-black
   Scenario: Slight change means different message and is sent twice
     When SMTP client "1" sends the following message from "[user:user]@[domain]" to "[user:to]@[domain]":
       """

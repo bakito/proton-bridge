@@ -29,7 +29,6 @@ namespace {
 
 
 Empty empty; ///< Empty protobuf message, re-used across calls.
-qint64 const port = 1042; ///< The port for the focus service.
 QString const hostname = "127.0.0.1"; ///< The hostname of the focus service.
 
 
@@ -40,11 +39,51 @@ namespace bridgepp {
 
 
 //****************************************************************************************************************************************************
-/// \param[in] timeoutMs The timeout for the connexion.
-/// \param[out] outError if not null and the function returns false.
-/// \return true iff the connexion was successfully established.
+/// \return the gRPC Focus server config file name
 //****************************************************************************************************************************************************
-bool FocusGRPCClient::connectToServer(qint64 timeoutMs, QString *outError) {
+QString grpcFocusServerConfigFilename() {
+    return "grpcFocusServerConfig.json";
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] log The log.
+//****************************************************************************************************************************************************
+FocusGRPCClient::FocusGRPCClient(Log& log)
+    :log_(log) {
+
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The absolute path of the focus service config path.
+//****************************************************************************************************************************************************
+QString FocusGRPCClient::grpcFocusServerConfigPath(QString const &configDir) {
+    return QDir(configDir).absoluteFilePath(grpcFocusServerConfigFilename());
+}
+
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void FocusGRPCClient::removeServiceConfigFile(QString const &configDir) {
+    QString const path = grpcFocusServerConfigPath(configDir);
+    if (!QFile(path).exists()) {
+        return;
+    }
+    if (!QFile().remove(path)) {
+        throw Exception("Could not remove gRPC focus service config file.");
+    }
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] timeoutMs The timeout for the connection.
+/// \param[in] port The gRPC server port.
+/// \param[out] outError if not null and the function returns false.
+/// \return true iff the connection was successfully established.
+//****************************************************************************************************************************************************
+bool FocusGRPCClient::connectToServer(qint64 timeoutMs, quint16 port, QString *outError) {
     try {
         QString const address = QString("%1:%2").arg(hostname).arg(port);
         channel_ = grpc::CreateChannel(address.toStdString(), grpc::InsecureChannelCredentials());
@@ -58,9 +97,10 @@ bool FocusGRPCClient::connectToServer(qint64 timeoutMs, QString *outError) {
         }
 
         if (channel_->GetState(true) != GRPC_CHANNEL_READY) {
-            throw Exception("Connexion check with focus service failed.");
+            throw Exception("Connection check with focus service failed.");
         }
 
+        log_.debug(QString("Successfully connected to focus gRPC service."));
         return true;
     }
     catch (Exception const &e) {
@@ -73,11 +113,15 @@ bool FocusGRPCClient::connectToServer(qint64 timeoutMs, QString *outError) {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] reason The reason behind the raise call.
 /// \return The status for the call.
 //****************************************************************************************************************************************************
-grpc::Status FocusGRPCClient::raise() {
+grpc::Status FocusGRPCClient::raise(QString const &reason) {
+    log_.debug("FocusGRPCService::raise()");
     ClientContext ctx;
-    return stub_->Raise(&ctx, empty, &empty);
+    StringValue s;
+    s.set_value(reason.toStdString());
+    return stub_->Raise(&ctx, s, &empty);
 }
 
 
@@ -86,6 +130,7 @@ grpc::Status FocusGRPCClient::raise() {
 /// \return The status for the call.
 //****************************************************************************************************************************************************
 grpc::Status FocusGRPCClient::version(QString &outVersion) {
+    log_.debug("FocusGRPCService::version()");
     ClientContext ctx;
     VersionResponse response;
     Status status = stub_->Version(&ctx, empty, &response);

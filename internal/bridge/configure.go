@@ -18,6 +18,8 @@
 package bridge
 
 import (
+	"context"
+	"errors"
 	"strings"
 
 	"github.com/ProtonMail/proton-bridge/v3/internal/clientconfig"
@@ -29,9 +31,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ConfigureAppleMail configures apple mail for the given userID and address.
-// If configuring apple mail for Catalina or newer, it ensures Bridge is using SSL.
-func (bridge *Bridge) ConfigureAppleMail(userID, address string) error {
+// ConfigureAppleMail configures Apple Mail for the given userID and address.
+// If configuring Apple Mail for Catalina or newer, it ensures Bridge is using SSL.
+func (bridge *Bridge) ConfigureAppleMail(ctx context.Context, userID, address string) error {
 	logrus.WithFields(logrus.Fields{
 		"userID":  userID,
 		"address": logging.Sensitive(address),
@@ -43,20 +45,32 @@ func (bridge *Bridge) ConfigureAppleMail(userID, address string) error {
 			return ErrNoSuchUser
 		}
 
-		if address == "" {
-			address = user.Emails()[0]
+		emails := user.Emails()
+		displayNames := user.DisplayNames()
+		if (len(emails) == 0) || (len(displayNames) == 0) {
+			return errors.New("could not retrieve user address info")
 		}
 
-		username := address
-		addresses := address
+		if address == "" {
+			address = emails[0]
+		}
 
+		var username, displayName, addresses string
 		if user.GetAddressMode() == vault.CombinedMode {
-			username = user.Emails()[0]
-			addresses = strings.Join(user.Emails(), ",")
+			username = address
+			displayName = displayNames[username]
+			addresses = strings.Join(emails, ",")
+		} else {
+			username = address
+			addresses = address
+			displayName = displayNames[address]
+			if len(displayName) == 0 {
+				displayName = address
+			}
 		}
 
 		if useragent.IsCatalinaOrNewer() && !bridge.vault.GetSMTPSSL() {
-			if err := bridge.SetSMTPSSL(true); err != nil {
+			if err := bridge.SetSMTPSSL(ctx, true); err != nil {
 				return err
 			}
 		}
@@ -68,6 +82,7 @@ func (bridge *Bridge) ConfigureAppleMail(userID, address string) error {
 			bridge.vault.GetIMAPSSL(),
 			bridge.vault.GetSMTPSSL(),
 			username,
+			displayName,
 			addresses,
 			user.BridgePass(),
 		)

@@ -39,8 +39,10 @@ void GRPCQtProxy::connectSignals() {
     connect(this, &GRPCQtProxy::setIsAutostartOnReceived, &settingsTab, &SettingsTab::setIsAutostartOn);
     connect(this, &GRPCQtProxy::setIsBetaEnabledReceived, &settingsTab, &SettingsTab::setIsBetaEnabled);
     connect(this, &GRPCQtProxy::setIsAllMailVisibleReceived, &settingsTab, &SettingsTab::setIsAllMailVisible);
+    connect(this, &GRPCQtProxy::setIsTelemetryDisabledReceived, &settingsTab, &SettingsTab::setIsTelemetryDisabled);
     connect(this, &GRPCQtProxy::setColorSchemeNameReceived, &settingsTab, &SettingsTab::setColorSchemeName);
     connect(this, &GRPCQtProxy::reportBugReceived, &settingsTab, &SettingsTab::setBugReport);
+    connect(this, &GRPCQtProxy::installTLSCertificateReceived, &settingsTab, &SettingsTab::installTLSCertificate);
     connect(this, &GRPCQtProxy::exportTLSCertificatesReceived, &settingsTab, &SettingsTab::exportTLSCertificates);
     connect(this, &GRPCQtProxy::setIsStreamingReceived, &settingsTab, &SettingsTab::setIsStreaming);
     connect(this, &GRPCQtProxy::setClientPlatformReceived, &settingsTab, &SettingsTab::setClientPlatform);
@@ -53,6 +55,7 @@ void GRPCQtProxy::connectSignals() {
     connect(this, &GRPCQtProxy::logoutUserReceived, &usersTab, &UsersTab::logoutUser);
     connect(this, &GRPCQtProxy::setUserSplitModeReceived, &usersTab, &UsersTab::setUserSplitMode);
     connect(this, &GRPCQtProxy::configureUserAppleMailReceived, &usersTab, &UsersTab::configureUserAppleMail);
+    connect(this, &GRPCQtProxy::sendBadEventUserFeedbackReceived, &usersTab, &UsersTab::processBadEventUserFeedback);
 }
 
 
@@ -89,6 +92,13 @@ void GRPCQtProxy::setIsAllMailVisible(bool visible) {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] isDisabled Is telemetry disabled?
+//****************************************************************************************************************************************************
+void GRPCQtProxy::setIsTelemetryDisabled(bool isDisabled) {
+    emit setIsTelemetryDisabledReceived(isDisabled);
+}
+
+//****************************************************************************************************************************************************
 /// \param[in] name The color scheme.
 //****************************************************************************************************************************************************
 void GRPCQtProxy::setColorSchemeName(QString const &name) {
@@ -109,6 +119,13 @@ void GRPCQtProxy::reportBug(QString const &osType, QString const &osVersion, QSt
     emit reportBugReceived(osType, osVersion, emailClient, address, description, includeLogs);
 }
 
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void GRPCQtProxy::installTLSCertificate() {
+    emit installTLSCertificateReceived();
+}
 
 //****************************************************************************************************************************************************
 /// \param[in] folderPath The folder path.
@@ -175,6 +192,15 @@ void GRPCQtProxy::setIsAutomaticUpdateOn(bool on) {
 //****************************************************************************************************************************************************
 void GRPCQtProxy::setUserSplitMode(QString const &userID, bool makeItActive) {
     emit setUserSplitModeReceived(userID, makeItActive);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] doResync Did the user request a resync?
+//****************************************************************************************************************************************************
+void GRPCQtProxy::sendBadEventUserFeedback(QString const &userID, bool doResync) {
+    emit sendBadEventUserFeedbackReceived(userID, doResync);
 }
 
 

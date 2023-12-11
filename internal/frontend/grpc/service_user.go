@@ -20,6 +20,7 @@ package grpc
 import (
 	"context"
 
+	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,7 +28,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-func (s *Service) GetUserList(ctx context.Context, _ *emptypb.Empty) (*UserListResponse, error) {
+func (s *Service) GetUserList(_ context.Context, _ *emptypb.Empty) (*UserListResponse, error) {
 	s.log.Debug("GetUserList")
 
 	userIDs := s.bridge.GetUserIDs()
@@ -50,7 +51,7 @@ func (s *Service) GetUserList(ctx context.Context, _ *emptypb.Empty) (*UserListR
 	return &UserListResponse{Users: userList}, nil
 }
 
-func (s *Service) GetUser(ctx context.Context, userID *wrapperspb.StringValue) (*User, error) {
+func (s *Service) GetUser(_ context.Context, userID *wrapperspb.StringValue) (*User, error) {
 	s.log.WithField("userID", userID).Debug("GetUser")
 
 	user, err := s.bridge.GetUserInfo(userID.Value)
@@ -61,7 +62,7 @@ func (s *Service) GetUser(ctx context.Context, userID *wrapperspb.StringValue) (
 	return grpcUserFromInfo(user), nil
 }
 
-func (s *Service) SetUserSplitMode(ctx context.Context, splitMode *UserSplitModeRequest) (*emptypb.Empty, error) {
+func (s *Service) SetUserSplitMode(_ context.Context, splitMode *UserSplitModeRequest) (*emptypb.Empty, error) {
 	s.log.WithField("UserID", splitMode.UserID).WithField("Active", splitMode.Active).Debug("SetUserSplitMode")
 
 	user, err := s.bridge.GetUserInfo(splitMode.UserID)
@@ -70,7 +71,7 @@ func (s *Service) SetUserSplitMode(ctx context.Context, splitMode *UserSplitMode
 	}
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 		defer func() { _ = s.SendEvent(NewUserToggleSplitModeFinishedEvent(splitMode.UserID)) }()
 
 		var targetMode vault.AddressMode
@@ -95,7 +96,25 @@ func (s *Service) SetUserSplitMode(ctx context.Context, splitMode *UserSplitMode
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) LogoutUser(ctx context.Context, userID *wrapperspb.StringValue) (*emptypb.Empty, error) {
+func (s *Service) SendBadEventUserFeedback(_ context.Context, feedback *UserBadEventFeedbackRequest) (*emptypb.Empty, error) {
+	l := s.log.WithField("UserID", feedback.UserID).WithField("doResync", feedback.DoResync)
+	l.Debug("SendBadEventUserFeedback")
+
+	user, err := s.bridge.GetUserInfo(feedback.UserID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "user not found %v", feedback.UserID)
+	}
+
+	if err := s.bridge.SendBadEventUserFeedback(context.Background(), user.UserID, feedback.DoResync); err != nil {
+		l.WithError(err).Error("Failed to send bad event feedback")
+	}
+
+	l.Info("Sending bad event feedback finished.")
+
+	return &emptypb.Empty{}, nil
+}
+
+func (s *Service) LogoutUser(_ context.Context, userID *wrapperspb.StringValue) (*emptypb.Empty, error) {
 	s.log.WithField("UserID", userID.Value).Debug("LogoutUser")
 
 	if _, err := s.bridge.GetUserInfo(userID.Value); err != nil {
@@ -103,7 +122,7 @@ func (s *Service) LogoutUser(ctx context.Context, userID *wrapperspb.StringValue
 	}
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		if err := s.bridge.LogoutUser(context.Background(), userID.Value); err != nil {
 			s.log.WithError(err).Error("Failed to log user out")
@@ -113,11 +132,11 @@ func (s *Service) LogoutUser(ctx context.Context, userID *wrapperspb.StringValue
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) RemoveUser(ctx context.Context, userID *wrapperspb.StringValue) (*emptypb.Empty, error) {
+func (s *Service) RemoveUser(_ context.Context, userID *wrapperspb.StringValue) (*emptypb.Empty, error) {
 	s.log.WithField("UserID", userID.Value).Debug("RemoveUser")
 
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		// remove preferences
 		if err := s.bridge.DeleteUser(context.Background(), userID.Value); err != nil {
@@ -133,7 +152,7 @@ func (s *Service) ConfigureUserAppleMail(ctx context.Context, request *Configure
 
 	sslWasEnabled := s.bridge.GetSMTPSSL()
 
-	if err := s.bridge.ConfigureAppleMail(request.UserID, request.Address); err != nil {
+	if err := s.bridge.ConfigureAppleMail(ctx, request.UserID, request.Address); err != nil {
 		s.log.WithField("userID", request.UserID).Error("Cannot configure AppleMail for user")
 		return nil, status.Error(codes.Internal, "Apple Mail config failed")
 	}

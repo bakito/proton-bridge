@@ -26,7 +26,9 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
+	"github.com/ProtonMail/proton-bridge/v3/internal/versioner"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 var (
@@ -45,15 +47,17 @@ type Installer interface {
 }
 
 type Updater struct {
+	versioner *versioner.Versioner
 	installer Installer
 	verifier  *crypto.KeyRing
 	product   string
 	platform  string
 }
 
-func NewUpdater(installer Installer, verifier *crypto.KeyRing, product, platform string) *Updater {
+func NewUpdater(ver *versioner.Versioner, verifier *crypto.KeyRing, product, platform string) *Updater {
 	return &Updater{
-		installer: installer,
+		versioner: ver,
+		installer: NewInstaller(ver),
 		verifier:  verifier,
 		product:   product,
 		platform:  platform,
@@ -101,10 +105,15 @@ func (u *Updater) InstallUpdate(ctx context.Context, downloader Downloader, upda
 	}
 
 	if err := u.installer.InstallUpdate(update.Version, bytes.NewReader(b)); err != nil {
+		logrus.WithError(err).Error("Failed to install update")
 		return ErrInstall
 	}
 
 	return nil
+}
+
+func (u *Updater) RemoveOldUpdates() error {
+	return u.versioner.RemoveOldVersions()
 }
 
 // getVersionFileURL returns the URL of the version file.

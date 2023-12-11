@@ -33,8 +33,11 @@ var (
 	// Version of the build.
 	Version = "0.0.0"
 
-	// Revision is current hash of the build.
+	// Revision is build time commit hash.
 	Revision = ""
+
+	// Tag is build time git describe.
+	Tag = ""
 
 	// BuildTime stamp of the build.
 	BuildTime = ""
@@ -44,6 +47,9 @@ var (
 
 	// DSNSentry client keys to be able to report crashes to Sentry.
 	DSNSentry = ""
+
+	// BuildEnv tags used at build time.
+	BuildEnv = ""
 )
 
 const (

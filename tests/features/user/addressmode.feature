@@ -14,36 +14,38 @@ Feature: Address mode
       | from       | to         | subject | unread |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
-    And bridge starts
+    Then it succeeds
+    When bridge starts
     And the user logs in with username "[user:user]" and password "password"
     And user "[user:user]" finishes syncing
+    Then it succeeds
 
   Scenario: The user is in combined mode
     When user "[user:user]" connects and authenticates IMAP client "1" with address "[user:user]@[domain]"
-    Then IMAP client "1" sees the following messages in "Folders/one":
+    Then IMAP client "1" eventually sees the following messages in "Folders/one":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
-    And IMAP client "1" sees the following messages in "Folders/two":
+    And IMAP client "1" eventually sees the following messages in "Folders/two":
       | from       | to         | subject | unread |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
-    And IMAP client "1" sees the following messages in "All Mail":
+    And IMAP client "1" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
     When user "[user:user]" connects and authenticates IMAP client "2" with address "[alias:alias]@[domain]"
-    Then IMAP client "2" sees the following messages in "Folders/one":
+    Then IMAP client "2" eventually sees the following messages in "Folders/one":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
-    And IMAP client "2" sees the following messages in "Folders/two":
+    And IMAP client "2" eventually sees the following messages in "Folders/two":
       | from       | to         | subject | unread |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
-    And IMAP client "2" sees the following messages in "All Mail":
+    And IMAP client "2" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
@@ -54,22 +56,22 @@ Feature: Address mode
     Given the user sets the address mode of user "[user:user]" to "split"
     And user "[user:user]" finishes syncing
     When user "[user:user]" connects and authenticates IMAP client "1" with address "[user:user]@[domain]"
-    Then IMAP client "1" sees the following messages in "Folders/one":
+    Then IMAP client "1" eventually sees the following messages in "Folders/one":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
-    And IMAP client "1" sees 0 messages in "Folders/two"
-    And IMAP client "1" sees the following messages in "All Mail":
+    And IMAP client "1" eventually sees 0 messages in "Folders/two"
+    And IMAP client "1" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
     When user "[user:user]" connects and authenticates IMAP client "2" with address "[alias:alias]@[domain]"
-    Then IMAP client "2" sees 0 messages in "Folders/one"
-    And IMAP client "2" sees the following messages in "Folders/two":
+    Then IMAP client "2" eventually sees 0 messages in "Folders/one"
+    And IMAP client "2" eventually sees the following messages in "Folders/two":
       | from       | to         | subject | unread |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
-    And IMAP client "2" sees the following messages in "All Mail":
+    And IMAP client "2" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
@@ -80,14 +82,14 @@ Feature: Address mode
     And the user sets the address mode of user "[user:user]" to "combined"
     And user "[user:user]" finishes syncing
     When user "[user:user]" connects and authenticates IMAP client "1" with address "[user:user]@[domain]"
-    Then IMAP client "1" sees the following messages in "All Mail":
+    Then IMAP client "1" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
     When user "[user:user]" connects and authenticates IMAP client "2" with address "[alias:alias]@[domain]"
-    Then IMAP client "2" sees the following messages in "All Mail":
+    Then IMAP client "2" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
@@ -96,14 +98,14 @@ Feature: Address mode
 
   Scenario: The user adds an address while in combined mode
     When user "[user:user]" connects and authenticates IMAP client "1" with address "[user:user]@[domain]"
-    Then IMAP client "1" sees the following messages in "All Mail":
+    Then IMAP client "1" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
     When user "[user:user]" connects and authenticates IMAP client "2" with address "[alias:alias]@[domain]"
-    Then IMAP client "2" sees the following messages in "All Mail":
+    Then IMAP client "2" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
@@ -112,7 +114,7 @@ Feature: Address mode
     Given the account "[user:user]" has additional address "other@[domain]"
     And bridge sends an address created event for user "[user:user]"
     When user "[user:user]" connects and authenticates IMAP client "3" with address "other@[domain]"
-    Then IMAP client "3" sees the following messages in "All Mail":
+    Then IMAP client "3" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
@@ -123,12 +125,12 @@ Feature: Address mode
     Given the user sets the address mode of user "[user:user]" to "split"
     And user "[user:user]" finishes syncing
     When user "[user:user]" connects and authenticates IMAP client "1" with address "[user:user]@[domain]"
-    And IMAP client "1" sees the following messages in "All Mail":
+    And IMAP client "1" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
     When user "[user:user]" connects and authenticates IMAP client "2" with address "[alias:alias]@[domain]"
-    And IMAP client "2" sees the following messages in "All Mail":
+    And IMAP client "2" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
@@ -139,14 +141,14 @@ Feature: Address mode
 
   Scenario: The user deletes an address while in combined mode
     When user "[user:user]" connects and authenticates IMAP client "1" with address "[user:user]@[domain]"
-    Then IMAP client "1" sees the following messages in "All Mail":
+    Then IMAP client "1" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |
     When user "[user:user]" connects and authenticates IMAP client "2" with address "[alias:alias]@[domain]"
-    Then IMAP client "2" sees the following messages in "All Mail":
+    Then IMAP client "2" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
@@ -161,12 +163,12 @@ Feature: Address mode
     Given the user sets the address mode of user "[user:user]" to "split"
     And user "[user:user]" finishes syncing
     When user "[user:user]" connects and authenticates IMAP client "1" with address "[user:user]@[domain]"
-    And IMAP client "1" sees the following messages in "All Mail":
+    And IMAP client "1" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | a@[domain] | a@[domain] | one     | true   |
       | b@[domain] | b@[domain] | two     | false  |
     When user "[user:user]" connects and authenticates IMAP client "2" with address "[alias:alias]@[domain]"
-    And IMAP client "2" sees the following messages in "All Mail":
+    And IMAP client "2" eventually sees the following messages in "All Mail":
       | from       | to         | subject | unread |
       | c@[domain] | c@[domain] | three   | true   |
       | d@[domain] | d@[domain] | four    | false  |

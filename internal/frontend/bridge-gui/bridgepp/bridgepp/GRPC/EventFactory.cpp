@@ -205,6 +205,51 @@ SPStreamEvent newReportBugErrorEvent() {
 //****************************************************************************************************************************************************
 /// \return The event.
 //****************************************************************************************************************************************************
+SPStreamEvent newReportBugFallbackEvent() {
+    auto event = new grpc::ReportBugFallbackEvent;
+    auto appEvent = new grpc::AppEvent;
+    appEvent->set_allocated_reportbugfallback(event);
+    return wrapAppEvent(appEvent);
+}
+
+
+
+//****************************************************************************************************************************************************
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newCertificateInstallSuccessEvent() {
+    auto event = new grpc::CertificateInstallSuccessEvent;
+    auto appEvent = new grpc::AppEvent;
+    appEvent->set_allocated_certificateinstallsuccess(event);
+    return wrapAppEvent(appEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newCertificateInstallCanceledEvent() {
+    auto event = new grpc::CertificateInstallCanceledEvent;
+    auto appEvent = new grpc::AppEvent;
+    appEvent->set_allocated_certificateinstallcanceled(event);
+    return wrapAppEvent(appEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newCertificateInstallFailedEvent() {
+    auto event = new grpc::CertificateInstallFailedEvent;
+    auto appEvent = new grpc::AppEvent;
+    appEvent->set_allocated_certificateinstallfailed(event);
+    return wrapAppEvent(appEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The event.
+//****************************************************************************************************************************************************
 SPStreamEvent newShowMainWindowEvent() {
     auto event = new grpc::ShowMainWindowEvent;
     auto appEvent = new grpc::AppEvent;
@@ -245,8 +290,9 @@ SPStreamEvent newLoginTfaRequestedEvent(QString const &username) {
 /// \param[in] username The username.
 /// \return The event.
 //****************************************************************************************************************************************************
-SPStreamEvent newLoginTwoPasswordsRequestedEvent() {
+SPStreamEvent newLoginTwoPasswordsRequestedEvent(QString const &username) {
     auto event = new ::grpc::LoginTwoPasswordsRequestedEvent;
+    event->set_username(username.toStdString());
     auto loginEvent = new grpc::LoginEvent;
     loginEvent->set_allocated_twopasswordrequested(event);
     return wrapLoginEvent(loginEvent);
@@ -334,7 +380,7 @@ SPStreamEvent newUpdateForceEvent(QString const &version) {
 //****************************************************************************************************************************************************
 /// \return the event.
 //****************************************************************************************************************************************************
-SPStreamEvent newUpdateSilentRestartNeeded() {
+SPStreamEvent newUpdateSilentRestartNeededEvent() {
     auto event = new grpc::UpdateSilentRestartNeeded;
     auto updateEvent = new grpc::UpdateEvent;
     updateEvent->set_allocated_silentrestartneeded(event);
@@ -345,7 +391,7 @@ SPStreamEvent newUpdateSilentRestartNeeded() {
 //****************************************************************************************************************************************************
 /// \return The event.
 //****************************************************************************************************************************************************
-SPStreamEvent newUpdateIsLatestVersion() {
+SPStreamEvent newUpdateIsLatestVersionEvent() {
     auto event = new grpc::UpdateIsLatestVersion;
     auto updateEvent = new grpc::UpdateEvent;
     updateEvent->set_allocated_islatestversion(event);
@@ -356,10 +402,21 @@ SPStreamEvent newUpdateIsLatestVersion() {
 //****************************************************************************************************************************************************
 /// \return The event.
 //****************************************************************************************************************************************************
-SPStreamEvent newUpdateCheckFinished() {
+SPStreamEvent newUpdateCheckFinishedEvent() {
     auto event = new grpc::UpdateCheckFinished;
     auto updateEvent = new grpc::UpdateEvent;
     updateEvent->set_allocated_checkfinished(event);
+    return wrapUpdateEvent(updateEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newUpdateVersionChangedEvent() {
+    auto event = new grpc::UpdateVersionChanged;
+    auto updateEvent = new grpc::UpdateEvent;
+    updateEvent->set_allocated_versionchanged(event);
     return wrapUpdateEvent(updateEvent);
 }
 
@@ -472,19 +529,6 @@ SPStreamEvent newRebuildKeychainEvent() {
 
 
 //****************************************************************************************************************************************************
-/// \param[in] email The email.
-/// \return The event.
-//****************************************************************************************************************************************************
-SPStreamEvent newNoActiveKeyForRecipientEvent(QString const &email) {
-    auto event = new grpc::NoActiveKeyForRecipientEvent;
-    event->set_email(email.toStdString());
-    auto mailEvent = new grpc::MailEvent;
-    mailEvent->set_allocated_noactivekeyforrecipientevent(event);
-    return wrapMailEvent(mailEvent);
-}
-
-
-//****************************************************************************************************************************************************
 /// \param[in] address The address.
 /// /// \return The event.
 //****************************************************************************************************************************************************
@@ -556,6 +600,92 @@ SPStreamEvent newUserChangedEvent(QString const &userID) {
     event->set_userid(userID.toStdString());
     auto userEvent = new grpc::UserEvent;
     userEvent->set_allocated_userchanged(event);
+    return wrapUserEvent(userEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] errorMessage The errorMessage
+//****************************************************************************************************************************************************
+SPStreamEvent newUserBadEvent(QString const &userID, QString const &errorMessage) {
+    auto event = new grpc::UserBadEvent;
+    event->set_userid(userID.toStdString());
+    event->set_errormessage(errorMessage.toStdString());
+    auto userEvent = new grpc::UserEvent;
+    userEvent->set_allocated_userbadevent(event);
+    return wrapUserEvent(userEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] usedBytes The number of used bytes.
+//****************************************************************************************************************************************************
+SPStreamEvent newUsedBytesChangedEvent(QString const &userID, qint64 usedBytes) {
+    auto event = new grpc::UsedBytesChangedEvent;
+    event->set_userid(userID.toStdString());
+    event->set_usedbytes(usedBytes);
+    auto userEvent = new grpc::UserEvent;
+    userEvent->set_allocated_usedbyteschangedevent(event);
+    return wrapUserEvent(userEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] username The username that was provided for the failed IMAP login attempt.
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newIMAPLoginFailedEvent(QString const &username) {
+    auto event = new grpc::ImapLoginFailedEvent;
+    event->set_username(username.toStdString());
+    auto userEvent = new grpc::UserEvent;
+    userEvent->set_allocated_imaploginfailedevent(event);
+    return wrapUserEvent(userEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newSyncStartedEvent(QString const &userID) {
+    auto event = new grpc::SyncStartedEvent;
+    event->set_userid(userID.toStdString());
+    auto userEvent = new grpc::UserEvent;
+    userEvent->set_allocated_syncstartedevent(event);
+    return wrapUserEvent(userEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newSyncFinishedEvent(QString const &userID) {
+    auto event = new grpc::SyncFinishedEvent;
+    event->set_userid(userID.toStdString());
+    auto userEvent = new grpc::UserEvent;
+    userEvent->set_allocated_syncfinishedevent(event);
+    return wrapUserEvent(userEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The userID.
+/// \param[in] progress The progress ratio.
+/// \param[in] elapsedMs The elapsed time in milliseconds.
+/// \param[in] remainingMs The remaining time in milliseconds.
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newSyncProgressEvent(QString const &userID, double progress, qint64 elapsedMs, qint64 remainingMs) {
+    auto event = new grpc::SyncProgressEvent;
+    event->set_userid(userID.toStdString());
+    event->set_progress(progress);
+    event->set_elapsedms(elapsedMs);
+    event->set_remainingms(remainingMs);
+    auto userEvent = new grpc::UserEvent;
+    userEvent->set_allocated_syncprogressevent(event);
     return wrapUserEvent(userEvent);
 }
 

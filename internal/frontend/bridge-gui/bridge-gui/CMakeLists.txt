@@ -75,7 +75,7 @@ if(NOT UNIX)
     set(CMAKE_INSTALL_BINDIR ".")
 endif(NOT UNIX)
 
-find_package(Qt6 COMPONENTS Core Quick Qml QuickControls2 Widgets REQUIRED)
+find_package(Qt6 COMPONENTS Core Quick Qml QuickControls2 Widgets Svg REQUIRED)
 qt_standard_project_setup()
 set(CMAKE_AUTORCC ON)
 message(STATUS "Using Qt ${Qt6_VERSION}")
@@ -85,20 +85,11 @@ message(STATUS "Using Qt ${Qt6_VERSION}")
 #*****************************************************************************************************************************************************
 find_package(sentry CONFIG REQUIRED)
 
-set(DSN_SENTRY "https://ea31dfe8574849108fb8ba044fec3620@api.protonmail.ch/core/v4/reports/sentry/7")
-set(SENTRY_CONFIG_GENERATED_FILE_DIR ${CMAKE_CURRENT_BINARY_DIR}/sentry-generated)
-set(SENTRY_CONFIG_FILE ${SENTRY_CONFIG_GENERATED_FILE_DIR}/project_sentry_config.h)
-file(GENERATE OUTPUT ${SENTRY_CONFIG_FILE} CONTENT
-    "// AUTO GENERATED FILE, DO NOT MODIFY\n#pragma once\nconst char* SentryDNS=\"${DSN_SENTRY}\";\nconst char* SentryProductID=\"bridge-mail@${BRIDGE_APP_VERSION}\";\n"
-)
-
-
-
 #*****************************************************************************************************************************************************
 # Source files and output
 #*****************************************************************************************************************************************************
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/Version.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/BuildConfig.h.in ${CMAKE_CURRENT_SOURCE_DIR}/BuildConfig.h)
 
 if (NOT TARGET bridgepp)
     add_subdirectory(../bridgepp bridgepp)
@@ -118,22 +109,23 @@ add_executable(bridge-gui
     Resources.qrc
     AppController.cpp AppController.h
     BridgeApp.cpp BridgeApp.h
+    BuildConfig.h
     CommandLine.cpp CommandLine.h
     EventStreamWorker.cpp EventStreamWorker.h
+    LogUtils.cpp LogUtils.h
     main.cpp
+    TrayIcon.cpp TrayIcon.h
     Pch.h
-    Version.h
     QMLBackend.cpp QMLBackend.h
     UserList.cpp UserList.h
     SentryUtils.cpp SentryUtils.h
+    Settings.cpp Settings.h
     ${DOCK_ICON_SRC_FILE} MacOS/DockIcon.h
     )
-
 
 if (APPLE)
     target_sources(bridge-gui PRIVATE MacOS/SecondInstance.mm MacOS/SecondInstance.h)
 endif(APPLE)
-
 
 if (WIN32) # on Windows, we add a (non-Qt) resource file that contains the application icon and version information.
     string(TIMESTAMP BRIDGE_BUILD_YEAR "%Y")
@@ -155,6 +147,7 @@ target_link_libraries(bridge-gui
     Qt6::Quick
     Qt6::Qml
     Qt6::QuickControls2
+    Qt6::Svg
     sentry::sentry
     bridgepp
     )

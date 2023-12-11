@@ -17,16 +17,66 @@
 
 package certs
 
-type Installer struct{}
+import (
+	"errors"
+
+	"github.com/sirupsen/logrus"
+)
+
+var (
+	ErrUserCanceledCertificateInstall = errors.New("the user cancelled the authorization dialog")
+)
+
+type Installer struct {
+	log *logrus.Entry
+}
 
 func NewInstaller() *Installer {
-	return &Installer{}
+	return &Installer{
+		log: logrus.WithField("pkg", "certs"),
+	}
+}
+
+func (installer *Installer) OSSupportCertInstall() bool {
+	return osSupportCertInstall()
 }
 
 func (installer *Installer) InstallCert(certPEM []byte) error {
-	return installCert(certPEM)
+	installer.log.Info("Installing the Bridge TLS certificate in the OS keychain")
+
+	if err := installCert(certPEM); err != nil {
+		installer.log.WithError(err).Error("The Bridge TLS certificate could not be installed in the OS keychain")
+		return err
+	}
+
+	installer.log.Info("The Bridge TLS certificate was successfully installed in the OS keychain")
+	return nil
 }
 
 func (installer *Installer) UninstallCert(certPEM []byte) error {
-	return uninstallCert(certPEM)
+	installer.log.Info("Uninstalling the Bridge TLS certificate from the OS keychain")
+
+	if err := uninstallCert(certPEM); err != nil {
+		installer.log.WithError(err).Error("The Bridge TLS certificate could not be uninstalled from the OS keychain")
+		return err
+	}
+
+	installer.log.Info("The Bridge TLS certificate was successfully uninstalled from the OS keychain")
+	return nil
+}
+
+func (installer *Installer) IsCertInstalled(certPEM []byte) bool {
+	return isCertInstalled(certPEM)
+}
+
+// LogCertInstallStatus reports the current status of the certificate installation in the log.
+// If certificate installation is not supported on the platform, this function does nothing.
+func (installer *Installer) LogCertInstallStatus(certPEM []byte) {
+	if installer.OSSupportCertInstall() {
+		if installer.IsCertInstalled(certPEM) {
+			installer.log.Info("The Bridge TLS certificate is installed in the OS keychain")
+		} else {
+			installer.log.Info("The Bridge TLS certificate is not installed in the OS keychain")
+		}
+	}
 }

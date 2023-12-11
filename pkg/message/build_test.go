@@ -39,7 +39,7 @@ func TestBuildPlainMessage(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/plain", "body", time.Now())
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -54,9 +54,10 @@ func TestBuildPlainMessageWithLongKey(t *testing.T) {
 
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/plain", "body", time.Now())
-	msg.ParsedHeaders["ReallyVeryVeryVeryVeryVeryLongLongLongLongLongLongLongKeyThatWillHaveNotSoLongValue"] = []string{"value"}
+	msg.ParsedHeaders.Values["ReallyVeryVeryVeryVeryVeryLongLongLongLongLongLongLongKeyThatWillHaveNotSoLongValue"] = []string{"value"}
+	msg.ParsedHeaders.Order = append(msg.ParsedHeaders.Order, "ReallyVeryVeryVeryVeryVeryLongLongLongLongLongLongLongKeyThatWillHaveNotSoLongValue")
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -73,7 +74,7 @@ func TestBuildHTMLMessage(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -91,7 +92,7 @@ func TestBuildPlainEncryptedMessage(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -116,7 +117,7 @@ func TestBuildPlainEncryptedMessageMissingHeader(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Now())
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -133,7 +134,7 @@ func TestBuildPlainEncryptedMessageInvalidHeader(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Now())
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -158,7 +159,7 @@ func TestBuildPlainSignedEncryptedMessageMissingHeader(t *testing.T) {
 
 	msg := newRawTestMessage("messageID", "addressID", "multipart/mixed", arm, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -195,7 +196,7 @@ func TestBuildPlainSignedEncryptedMessageInvalidHeader(t *testing.T) {
 
 	msg := newRawTestMessage("messageID", "addressID", "multipart/mixed", arm, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -224,7 +225,7 @@ func TestBuildPlainEncryptedLatin2Message(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -246,7 +247,7 @@ func TestBuildHTMLEncryptedMessage(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -280,7 +281,7 @@ func TestBuildPlainSignedMessage(t *testing.T) {
 
 	msg := newRawTestMessage("messageID", "addressID", "multipart/mixed", arm, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -318,7 +319,7 @@ func TestBuildPlainSignedBase64Message(t *testing.T) {
 
 	msg := newRawTestMessage("messageID", "addressID", "multipart/mixed", arm, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -349,7 +350,7 @@ func TestBuildSignedPlainEncryptedMessage(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -386,7 +387,7 @@ func TestBuildSignedHTMLEncryptedMessage(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -425,13 +426,13 @@ func TestBuildSignedPlainEncryptedMessageWithPubKey(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
 		expectDate(is(`Wed, 01 Jan 2020 00:00:00 +0000`)).
 		expectContentType(is(`multipart/signed`)).
-		expectContentTypeParam(`micalg`, is(`pgp-sha256`)).
+		expectContentTypeParam(`micalg`, is(`SHA-256`)).
 		expectContentTypeParam(`protocol`, is(`application/pgp-signature`))
 
 	section(t, res, 1).
@@ -439,7 +440,7 @@ func TestBuildSignedPlainEncryptedMessageWithPubKey(t *testing.T) {
 		expectContentTypeParam(`protected-headers`, is(`v1`)).
 		expectHeader(`Subject`, is(`simple plaintext body`)).
 		expectHeader(`From`, is(`"pm.bridge.qa" <pm.bridge.qa@gmail.com>`)).
-		expectHeader(`To`, is(`schizofrenic@pm.me`)).
+		expectHeader(`To`, is("\"InfernalBridgeTester@proton.me\" <InfernalbridgeTester@proton.me>")).
 		expectSection(verifiesAgainst(section(t, res, 1, 1, 2).pubKey(), section(t, res, 2).signature()))
 
 	section(t, res, 1, 1).
@@ -471,13 +472,13 @@ func TestBuildSignedHTMLEncryptedMessageWithPubKey(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
 		expectDate(is(`Wed, 01 Jan 2020 00:00:00 +0000`)).
 		expectContentType(is(`multipart/signed`)).
-		expectContentTypeParam(`micalg`, is(`pgp-sha256`)).
+		expectContentTypeParam(`micalg`, is(`SHA-256`)).
 		expectContentTypeParam(`protocol`, is(`application/pgp-signature`))
 
 	section(t, res, 1).
@@ -485,7 +486,7 @@ func TestBuildSignedHTMLEncryptedMessageWithPubKey(t *testing.T) {
 		expectContentTypeParam(`protected-headers`, is(`v1`)).
 		expectHeader(`Subject`, is(`simple html body`)).
 		expectHeader(`From`, is(`"pm.bridge.qa" <pm.bridge.qa@gmail.com>`)).
-		expectHeader(`To`, is(`schizofrenic@pm.me`)).
+		expectHeader(`To`, is("\"InfernalBridgeTester@proton.me\" <InfernalbridgeTester@proton.me>")).
 		expectSection(verifiesAgainst(section(t, res, 1, 1, 2).pubKey(), section(t, res, 2).signature()))
 
 	section(t, res, 1, 1).
@@ -518,13 +519,13 @@ func TestBuildSignedMultipartAlternativeEncryptedMessageWithPubKey(t *testing.T)
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
 		expectDate(is(`Wed, 01 Jan 2020 00:00:00 +0000`)).
 		expectContentType(is(`multipart/signed`)).
-		expectContentTypeParam(`micalg`, is(`pgp-sha256`)).
+		expectContentTypeParam(`micalg`, is(`SHA-256`)).
 		expectContentTypeParam(`protocol`, is(`application/pgp-signature`))
 
 	section(t, res, 1).
@@ -532,8 +533,8 @@ func TestBuildSignedMultipartAlternativeEncryptedMessageWithPubKey(t *testing.T)
 		expectContentTypeParam(`protected-headers`, is(`v1`)).
 		expectHeader(`Subject`, is(`Alternative`)).
 		expectHeader(`From`, is(`"pm.bridge.qa" <pm.bridge.qa@gmail.com>`)).
-		expectHeader(`To`, is(`schizofrenic@pm.me`)).
-		expectSection(verifiesAgainst(section(t, res, 1, 1, 3).pubKey(), section(t, res, 2).signature()))
+		expectHeader(`To`, is("\"InfernalBridgeTester@proton.me\" <InfernalbridgeTester@proton.me>")).
+		expectSection(verifiesAgainst(section(t, res, 1, 1, 2).pubKey(), section(t, res, 2).signature()))
 
 	section(t, res, 1, 1).
 		expectContentType(is(`multipart/mixed`))
@@ -549,17 +550,11 @@ func TestBuildSignedMultipartAlternativeEncryptedMessageWithPubKey(t *testing.T)
 
 	section(t, res, 1, 1, 1, 2).
 		expectContentType(is(`text/html`)).
-		expectBody(contains(`This <font color="#ee24cc">Rich</font> formated text`)).
+		expectBody(contains(`This Rich formated text`)).
 		expectBody(contains(`What kind of shoes do ninjas wear`)).
 		expectBody(contains(`How does a penguin build its house`))
 
 	section(t, res, 1, 1, 2).
-		expectContentType(is(`application/pdf`)).
-		expectTransferEncoding(is(`base64`)).
-		expectContentTypeParam(`name`, is(`minimal.pdf`)).
-		expectContentDispositionParam(`filename`, is(`minimal.pdf`))
-
-	section(t, res, 1, 1, 3).
 		expectContentType(is(`application/pgp-keys`)).
 		expectContentTypeParam(`name`, is(`OpenPGP_0x161C0875822359F7.asc`)).
 		expectContentDisposition(is(`attachment`)).
@@ -581,22 +576,22 @@ func TestBuildSignedEmbeddedMessageRFC822EncryptedMessageWithPubKey(t *testing.T
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "multipart/mixed", body, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
 		expectDate(is(`Wed, 01 Jan 2020 00:00:00 +0000`)).
 		expectContentType(is(`multipart/signed`)).
-		expectContentTypeParam(`micalg`, is(`pgp-sha256`)).
+		expectContentTypeParam(`micalg`, is(`SHA-256`)).
 		expectContentTypeParam(`protocol`, is(`application/pgp-signature`))
 
 	section(t, res, 1).
 		expectContentType(is(`multipart/mixed`)).
 		expectContentTypeParam(`protected-headers`, is(`v1`)).
-		expectHeader(`Subject`, is(`Fwd: HTML with attachment external PGP`)).
+		expectHeader(`Subject`, is(`Fwd: simple html body`)).
 		expectHeader(`From`, is(`"pm.bridge.qa" <pm.bridge.qa@gmail.com>`)).
-		expectHeader(`To`, is(`schizofrenic@pm.me`)).
-		expectSection(verifiesAgainst(section(t, res, 1, 1, 2).pubKey(), section(t, res, 2).signature()))
+		expectHeader(`To`, is("\"InfernalBridgeTester@proton.me\" <InfernalbridgeTester@proton.me>")).
+		expectSection(verifiesAgainst(section(t, res, 1, 1, 3).pubKey(), section(t, res, 2).signature()))
 
 	section(t, res, 1, 1).
 		expectContentType(is(`multipart/mixed`))
@@ -605,16 +600,16 @@ func TestBuildSignedEmbeddedMessageRFC822EncryptedMessageWithPubKey(t *testing.T
 		expectContentType(is(`text/plain`))
 
 	section(t, res, 1, 1, 2).
+		expectContentType(is(`message/rfc822`)).
+		expectContentTypeParam(`name`, is(`simple html body.eml`)).
+		expectContentDisposition(is(`attachment`)).
+		expectContentDispositionParam(`filename`, is(`simple html body.eml`))
+
+	section(t, res, 1, 1, 3).
 		expectContentType(is(`application/pgp-keys`)).
 		expectContentTypeParam(`name`, is(`OpenPGP_0x161C0875822359F7.asc`)).
 		expectContentDisposition(is(`attachment`)).
 		expectContentDispositionParam(`filename`, is(`OpenPGP_0x161C0875822359F7.asc`))
-
-	section(t, res, 1, 1, 3).
-		expectContentType(is(`message/rfc822`)).
-		expectContentTypeParam(`name`, is(`HTML with attachment external PGP.eml`)).
-		expectContentDisposition(is(`attachment`)).
-		expectContentDispositionParam(`filename`, is(`HTML with attachment external PGP.eml`))
 
 	section(t, res, 2).
 		expectContentType(is(`application/pgp-signature`)).
@@ -631,7 +626,7 @@ func TestBuildHTMLMessageWithAttachment(t *testing.T) {
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
 	att := addTestAttachment(t, kr, &msg, "attachID", "file.png", "image/png", "attachment", "attachment")
 
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res, 1).
@@ -655,7 +650,7 @@ func TestBuildHTMLMessageWithRFC822Attachment(t *testing.T) {
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
 	att := addTestAttachment(t, kr, &msg, "attachID", "file.eml", "message/rfc822", "attachment", "... message/rfc822 ...")
 
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res, 1).
@@ -679,7 +674,7 @@ func TestBuildHTMLMessageWithInlineAttachment(t *testing.T) {
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
 	inl := addTestAttachment(t, kr, &msg, "inlineID", "file.png", "image/png", "inline", "inline")
 
-	res, err := BuildRFC822(kr, msg, [][]byte{inl}, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{inl}, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res, 1).
@@ -709,7 +704,7 @@ func TestBuildHTMLMessageWithComplexAttachments(t *testing.T) {
 	att0 := addTestAttachment(t, kr, &msg, "attachID0", "attach0.png", "image/png", "attachment", "attach0")
 	att1 := addTestAttachment(t, kr, &msg, "attachID1", "attach1.png", "image/png", "attachment", "attach1")
 
-	res, err := BuildRFC822(kr, msg, [][]byte{
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{
 		inl0,
 		inl1,
 		att0,
@@ -762,7 +757,7 @@ func TestBuildAttachmentWithExoticFilename(t *testing.T) {
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
 	att := addTestAttachment(t, kr, &msg, "attachID", `I řeally šhould leařn czech.png`, "image/png", "attachment", "attachment")
 
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
 	require.NoError(t, err)
 
 	// The "name" and "filename" params should actually be RFC2047-encoded because they aren't 7-bit clean.
@@ -784,7 +779,7 @@ func TestBuildAttachmentWithLongFilename(t *testing.T) {
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
 	att := addTestAttachment(t, kr, &msg, "attachID", veryLongName, "image/png", "attachment", "attachment")
 
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
 	require.NoError(t, err)
 
 	// NOTE: hasMaxLineLength is too high! Long filenames should be linewrapped using multipart filenames.
@@ -793,7 +788,8 @@ func TestBuildAttachmentWithLongFilename(t *testing.T) {
 		expectHeader(`Content-Type`, contains(veryLongName)).
 		expectContentDispositionParam(`filename`, is(veryLongName)).
 		expectHeader(`Content-Disposition`, contains(veryLongName)).
-		expectSection(hasMaxLineLength(215))
+		// GODT-2477 - Implement line splitting according to RFC-2184.
+		expectSection(hasMaxLineLength(426))
 }
 
 func TestBuildMessageDate(t *testing.T) {
@@ -803,7 +799,7 @@ func TestBuildMessageDate(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/plain", "body", time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).expectDate(is(`Wed, 01 Jan 2020 00:00:00 +0000`))
@@ -819,7 +815,7 @@ func TestBuildMessageWithInvalidDate(t *testing.T) {
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Unix(-1, 0))
 
 	// Build the message as usual; the date will be before 1970.
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -827,12 +823,47 @@ func TestBuildMessageWithInvalidDate(t *testing.T) {
 		expectHeader(`X-Original-Date`, isMissing())
 
 	// Build the message with date sanitization enabled; the date will be RFC822's birthdate.
-	resFix, err := BuildRFC822(kr, msg, nil, JobOptions{SanitizeDate: true})
+	resFix, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{SanitizeDate: true})
 	require.NoError(t, err)
 
 	section(t, resFix).
 		expectDate(is(`Fri, 13 Aug 1982 00:00:00 +0000`)).
 		expectHeader(`X-Original-Date`, is(`Wed, 31 Dec 1969 23:59:59 +0000`))
+}
+
+func TestBuildMessageWithExistingOriginalDate(t *testing.T) {
+	m := gomock.NewController(t)
+	defer m.Finish()
+
+	kr := utils.MakeKeyRing(t)
+
+	// Create a new message with existing original date
+	msg := newTestMessageWithHeaders(t, kr,
+		"messageID",
+		"addressID",
+		"text/html",
+		"<html><body>body</body></html>",
+		time.Unix(-1, 0),
+		map[string][]string{
+			"X-Original-Date": {"Sun, 15 Jan 2023 04:23:03 +0100 (W. Europe Standard Time)"},
+			"Date":            {"15-Jan-2023 04:23:13 +0100"},
+		})
+
+	// Build the message as usual; the date will be before 1970.
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
+	require.NoError(t, err)
+
+	section(t, res).
+		expectDate(is(`15-Jan-2023 04:23:13 +0100`)).
+		expectHeader(`X-Original-Date`, is("Sun, 15 Jan 2023 04:23:03 +0100 (W. Europe Standard Time)"))
+
+	// Build the message with date sanitization enabled; the date will be RFC822's birthdate.
+	resFix, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{SanitizeDate: true})
+	require.NoError(t, err)
+
+	section(t, resFix).
+		expectDate(is(`Fri, 13 Aug 1982 00:00:00 +0000`)).
+		expectHeader(`X-Original-Date`, is("Sun, 15 Jan 2023 04:23:03 +0100 (W. Europe Standard Time)"))
 }
 
 func TestBuildMessageInternalID(t *testing.T) {
@@ -842,7 +873,7 @@ func TestBuildMessageInternalID(t *testing.T) {
 	kr := utils.MakeKeyRing(t)
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/plain", "body", time.Now())
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).expectHeader(`Message-Id`, is(`<messageID@protonmail.internalid>`))
@@ -858,7 +889,7 @@ func TestBuildMessageExternalID(t *testing.T) {
 	// Set the message's external ID; this should be used preferentially to set the Message-Id header field.
 	msg.ExternalID = "externalID"
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).expectHeader(`Message-Id`, is(`<externalID>`))
@@ -873,7 +904,7 @@ func TestBuild8BitBody(t *testing.T) {
 	// Set an 8-bit body; the charset should be set to UTF-8.
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/plain", "I řeally šhould leařn czech", time.Now())
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).expectContentTypeParam(`charset`, is(`utf-8`))
@@ -889,7 +920,7 @@ func TestBuild8BitSubject(t *testing.T) {
 	// Set an 8-bit subject; it should be RFC2047-encoded.
 	msg.Subject = `I řeally šhould leařn czech`
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -910,7 +941,7 @@ func TestBuild8BitSender(t *testing.T) {
 		Address: `mail@example.com`,
 	}
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -931,7 +962,7 @@ func TestBuild8BitRecipients(t *testing.T) {
 		{Name: `leařn czech`, Address: `mail2@example.com`},
 	}
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -947,14 +978,15 @@ func TestBuildIncludeMessageIDReference(t *testing.T) {
 	msg := newTestMessage(t, kr, "messageID", "addressID", "text/plain", "body", time.Now())
 
 	// Add references.
-	msg.ParsedHeaders["References"] = []string{"<myreference@domain.com>"}
+	msg.ParsedHeaders.Values["References"] = []string{"<myreference@domain.com>"}
+	msg.ParsedHeaders.Order = append(msg.ParsedHeaders.Order, "References")
 
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.NoError(t, err)
 
 	section(t, res).expectHeader(`References`, is(`<myreference@domain.com>`))
 
-	resRef, err := BuildRFC822(kr, msg, nil, JobOptions{AddMessageIDReference: true})
+	resRef, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{AddMessageIDReference: true})
 	require.NoError(t, err)
 
 	section(t, resRef).expectHeader(`References`, is(`<myreference@domain.com> <messageID@protonmail.internalid>`))
@@ -969,10 +1001,10 @@ func TestBuildMessageIsDeterministic(t *testing.T) {
 	inl := addTestAttachment(t, kr, &msg, "inlineID", "file.png", "image/png", "inline", "inline")
 	att := addTestAttachment(t, kr, &msg, "attachID", "attach.png", "image/png", "attachment", "attachment")
 
-	res1, err := BuildRFC822(kr, msg, [][]byte{inl, att}, JobOptions{})
+	res1, err := DecryptAndBuildRFC822(kr, msg, [][]byte{inl, att}, JobOptions{})
 	require.NoError(t, err)
 
-	res2, err := BuildRFC822(kr, msg, [][]byte{inl, att}, JobOptions{})
+	res2, err := DecryptAndBuildRFC822(kr, msg, [][]byte{inl, att}, JobOptions{})
 	require.NoError(t, err)
 
 	assert.Equal(t, res1, res2)
@@ -987,7 +1019,7 @@ func TestBuildUndecryptableMessage(t *testing.T) {
 	// Use a different keyring for encrypting the message; it won't be decryptable.
 	msg := newTestMessage(t, utils.MakeKeyRing(t), "messageID", "addressID", "text/plain", "body", time.Now())
 
-	_, err := BuildRFC822(kr, msg, nil, JobOptions{})
+	_, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{})
 	require.ErrorIs(t, err, ErrDecryptionFailed)
 }
 
@@ -1001,7 +1033,7 @@ func TestBuildUndecryptableAttachment(t *testing.T) {
 	// Use a different keyring for encrypting the attachment; it won't be decryptable.
 	att := addTestAttachment(t, utils.MakeKeyRing(t), &msg, "attachID", "file.png", "image/png", "attachment", "attachment")
 
-	_, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
+	_, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{})
 	require.ErrorIs(t, err, ErrDecryptionFailed)
 }
 
@@ -1016,7 +1048,7 @@ func TestBuildCustomMessagePlain(t *testing.T) {
 	msg := newTestMessage(t, foreignKR, "messageID", "addressID", "text/plain", "body", time.Now())
 
 	// Tell the job to ignore decryption errors; a custom message will be returned instead of an error.
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{IgnoreDecryptionErrors: true})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{IgnoreDecryptionErrors: true})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -1040,7 +1072,7 @@ func TestBuildCustomMessageHTML(t *testing.T) {
 	msg := newTestMessage(t, foreignKR, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
 
 	// Tell the job to ignore decryption errors; a custom message will be returned instead of an error.
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{IgnoreDecryptionErrors: true})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{IgnoreDecryptionErrors: true})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -1068,7 +1100,7 @@ func TestBuildCustomMessageEncrypted(t *testing.T) {
 	msg.Subject = "this is a subject to make sure we preserve subject"
 
 	// Tell the job to ignore decryption errors; a custom message will be returned instead of an error.
-	res, err := BuildRFC822(kr, msg, nil, JobOptions{IgnoreDecryptionErrors: true})
+	res, err := DecryptAndBuildRFC822(kr, msg, nil, JobOptions{IgnoreDecryptionErrors: true})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -1102,7 +1134,7 @@ func TestBuildCustomMessagePlainWithAttachment(t *testing.T) {
 	att := addTestAttachment(t, foreignKR, &msg, "attachID", "file.png", "image/png", "attachment", "attachment")
 
 	// Tell the job to ignore decryption errors; a custom message will be returned instead of an error.
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -1135,7 +1167,7 @@ func TestBuildCustomMessageHTMLWithAttachment(t *testing.T) {
 	att := addTestAttachment(t, foreignKR, &msg, "attachID", "file.png", "image/png", "attachment", "attachment")
 
 	// Tell the job to ignore decryption errors; a custom message will be returned instead of an error.
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -1170,7 +1202,7 @@ func TestBuildCustomMessageOnlyBodyIsUndecryptable(t *testing.T) {
 	att := addTestAttachment(t, kr, &msg, "attachID", "file.png", "image/png", "attachment", "attachment")
 
 	// Tell the job to ignore decryption errors; a custom message will be returned instead of an error.
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -1203,7 +1235,7 @@ func TestBuildCustomMessageOnlyAttachmentIsUndecryptable(t *testing.T) {
 	att := addTestAttachment(t, foreignKR, &msg, "attachID", "file.png", "image/png", "attachment", "attachment")
 
 	// Tell the job to ignore decryption errors; a custom message will be returned instead of an error.
-	res, err := BuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{att}, JobOptions{IgnoreDecryptionErrors: true})
 	require.NoError(t, err)
 
 	section(t, res).
@@ -1230,4 +1262,39 @@ func readFile(t *testing.T, path string) string {
 	require.NoError(t, err)
 
 	return string(b)
+}
+
+func TestBuildComplexMIMEType(t *testing.T) {
+	m := gomock.NewController(t)
+	defer m.Finish()
+
+	kr := utils.MakeKeyRing(t)
+	msg := newTestMessage(t, kr, "messageID", "addressID", "text/html", "<html><body>body</body></html>", time.Now())
+	att0 := addTestAttachment(t, kr, &msg, "attachID0", "attach0.png", "image/png", "attachment", "attach0")
+	att1 := addTestAttachment(t, kr, &msg, "attachID1", "Cat_August_2010-4.jpeg", "image/jpeg; name=Cat_August_2010-4.jpeg; x-unix-mode=0644", "attachment", "attach1")
+
+	res, err := DecryptAndBuildRFC822(kr, msg, [][]byte{
+		att0,
+		att1,
+	}, JobOptions{})
+	require.NoError(t, err)
+
+	section(t, res, 1).
+		expectBody(is(`<html><body>body</body></html>`)).
+		expectContentType(is(`text/html`)).
+		expectTransferEncoding(is(`quoted-printable`))
+
+	section(t, res, 2).
+		expectBody(is(`attach0`)).
+		expectContentType(is(`image/png`)).
+		expectTransferEncoding(is(`base64`)).
+		expectContentTypeParam(`name`, is(`attach0.png`)).
+		expectContentDispositionParam(`filename`, is(`attach0.png`))
+
+	section(t, res, 3).
+		expectBody(is(`attach1`)).
+		expectContentType(is(`image/jpeg`)).
+		expectTransferEncoding(is(`base64`)).
+		expectContentTypeParam(`name`, is(`Cat_August_2010-4.jpeg`)).
+		expectContentDispositionParam(`filename`, is(`Cat_August_2010-4.jpeg`))
 }

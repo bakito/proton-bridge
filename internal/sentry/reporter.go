@@ -25,7 +25,10 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/algo"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/restarter"
 	"github.com/getsentry/sentry-go"
 	"github.com/sirupsen/logrus"
@@ -36,19 +39,29 @@ var skippedFunctions = []string{} //nolint:gochecknoglobals
 func init() { //nolint:gochecknoinits
 	sentrySyncTransport := sentry.NewHTTPSyncTransport()
 	sentrySyncTransport.Timeout = time.Second * 3
+	appVersion := constants.Version
+	version, _ := semver.NewVersion(appVersion)
+	if version != nil {
+		appVersion = version.Original()
+	}
 
-	if err := sentry.Init(sentry.ClientOptions{
-		Dsn:        constants.DSNSentry,
-		Release:    constants.Revision,
-		BeforeSend: EnhanceSentryEvent,
-		Transport:  sentrySyncTransport,
-	}); err != nil {
+	options := sentry.ClientOptions{
+		Dsn:            constants.DSNSentry,
+		Release:        constants.AppVersion(appVersion),
+		BeforeSend:     EnhanceSentryEvent,
+		Transport:      sentrySyncTransport,
+		ServerName:     GetProtectedHostname(),
+		Environment:    constants.BuildEnv,
+		MaxBreadcrumbs: 50,
+	}
+
+	if err := sentry.Init(options); err != nil {
 		logrus.WithError(err).Error("Failed to initialize sentry options")
 	}
 
 	sentry.ConfigureScope(func(scope *sentry.Scope) {
 		scope.SetFingerprint([]string{"{{ default }}"})
-		scope.SetTag("UserID", "not-defined")
+		scope.SetUser(sentry.User{ID: GetProtectedHostname()})
 	})
 
 	sentry.Logger = log.New(
@@ -68,11 +81,24 @@ type Identifier interface {
 	GetUserAgent() string
 }
 
+func GetProtectedHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "Unknown"
+	}
+	return algo.HashBase64SHA256(hostname)
+}
+
+func GetTimeZone() string {
+	zone, offset := time.Now().Zone()
+	return fmt.Sprintf("%s%+d", zone, offset/3600)
+}
+
 // NewReporter creates new sentry reporter with appName and appVersion to report.
-func NewReporter(appName, appVersion string, identifier Identifier) *Reporter {
+func NewReporter(appName string, identifier Identifier) *Reporter {
 	return &Reporter{
 		appName:    appName,
-		appVersion: appVersion,
+		appVersion: constants.Revision,
 		identifier: identifier,
 		hostArch:   getHostArch(),
 	}
@@ -151,6 +177,14 @@ func (r *Reporter) scopedReport(context map[string]interface{}, doReport func())
 	return nil
 }
 
+func ReportError(r reporter.Reporter, msg string, err error) {
+	if rerr := r.ReportMessageWithContext(msg, reporter.Context{
+		"error": err.Error(),
+	}); rerr != nil {
+		logrus.WithError(rerr).WithField("msg", msg).Error("Failed to send report")
+	}
+}
+
 // SkipDuringUnwind removes caller from the traceback.
 func SkipDuringUnwind() {
 	pcs := make([]uintptr, 2)
@@ -169,7 +203,7 @@ func SkipDuringUnwind() {
 }
 
 // EnhanceSentryEvent swaps type with value and removes panic handlers from the stacktrace.
-func EnhanceSentryEvent(event *sentry.Event, hint *sentry.EventHint) *sentry.Event {
+func EnhanceSentryEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	for idx, exception := range event.Exception {
 		exception.Type, exception.Value = exception.Value, exception.Type
 		if exception.Stacktrace != nil {

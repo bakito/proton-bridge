@@ -20,34 +20,30 @@
 #define BRIDGE_GUI_APP_CONTROLLER_H
 
 
+//@formatter:off
 class QMLBackend;
-
-
+class Settings;
 namespace bridgepp {
 class Log;
-
-
 class Overseer;
-
-
 class GRPCClient;
-
-
 class ProcessMonitor;
+class Exception;
 }
+//@formatter:on
 
 
 //****************************************************************************************************************************************************
 /// \brief App controller class.
 //****************************************************************************************************************************************************
 class AppController : public QObject {
-Q_OBJECT
+    Q_OBJECT
     friend AppController &app();
 
 public: // member functions.
     AppController(AppController const &) = delete; ///< Disabled copy-constructor.
     AppController(AppController &&) = delete; ///< Disabled assignment copy-constructor.
-    ~AppController() override = default; ///< Destructor.
+    ~AppController() override; ///< Destructor.
     AppController &operator=(AppController const &) = delete; ///< Disabled assignment operator.
     AppController &operator=(AppController &&) = delete; ///< Disabled move assignment operator.
     QMLBackend &backend() { return *backend_; } ///< Return a reference to the backend.
@@ -55,18 +51,27 @@ public: // member functions.
     bridgepp::Log &log() { return *log_; } ///< Return a reference to the log.
     std::unique_ptr<bridgepp::Overseer> &bridgeOverseer() { return bridgeOverseer_; }; ///< Returns a reference the bridge overseer
     bridgepp::ProcessMonitor *bridgeMonitor() const; ///< Return the bridge worker.
+    Settings &settings();; ///< Return the application settings.
+    void setLauncherArgs(const QString &launcher, const QStringList &args); ///< Set the launcher arguments.
+    void setSessionID(QString const &sessionID); ///< Set the sessionID.
+    QString sessionID(); ///< Get the sessionID.
 
 public slots:
-    void onFatalError(QString const &function, QString const &message); ///< Handle fatal errors.
+    void onFatalError(bridgepp::Exception const &e); ///< Handle fatal errors.
 
 private: // member functions
     AppController(); ///< Default constructor.
+    void restart(bool isCrashing = false); ///< Restart the app.
 
 private: // data members
     std::unique_ptr<QMLBackend> backend_; ///< The backend.
     std::unique_ptr<bridgepp::GRPCClient> grpc_; ///< The RPC client.
     std::unique_ptr<bridgepp::Log> log_; ///< The log.
     std::unique_ptr<bridgepp::Overseer> bridgeOverseer_; ///< The overseer for the bridge monitor worker.
+    std::unique_ptr<Settings> settings_; ///< The application settings.
+    QString launcher_; ///< The launcher.
+    QStringList launcherArgs_; ///< The launcher arguments.
+    QString sessionID_; ///<  The sessionID.
 };
 
 

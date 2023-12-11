@@ -20,7 +20,7 @@
 #define BRIDGE_PP_TESTER_BRIDGE_UTILS_H
 
 
-#include <bridgepp/User/User.h>
+#include "User/User.h"
 
 
 namespace bridgepp {
@@ -38,17 +38,19 @@ enum class OS {
 
 QString userConfigDir(); ///< Get the path of the user configuration folder.
 QString userCacheDir(); ///< Get the path of the user cache folder.
-QString userLogsDir(); ///< Get the path of the user logs folder.
+QString userDataDir(); ///< Get the path of the user data folder.
 QString sentryCacheDir(); ///< Get the path of the sentry cache folder.
 QString goos(); ///< return the value of Go's  GOOS for the current platform ("darwin", "linux" and "windows"  are supported).
 qint64 randN(qint64 n); ///< return a random integer in the half open range  [0,n)
 QString randomFirstName(); ///< Get a random first name from a pre-determined list.
 QString randomLastName(); ///< Get a random first name from a pre-determined list.
-SPUser randomUser(); ///< Get a random user.
+SPUser defaultUser(); ///< Return The default user, with the name and addresses used on screenshots on proton.me
+SPUser randomUser(QString const &firstName = "", QString const &lastName = ""); ///< Get a random user.
 OS os(); ///< Return the operating system.
 bool onLinux(); ///< Check if the OS is Linux.
 bool onMacOS(); ///< Check if the OS is macOS.
 bool onWindows(); ///< Check if the OS in Windows.
+QString elideLongString(QString const &str, qint32 maxLength); ///< Elide a string in the middle if its length exceed maxLength.
 
 
 } // namespace

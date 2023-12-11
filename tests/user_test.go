@@ -24,14 +24,17 @@ import (
 	"net/mail"
 	"strings"
 
+	"github.com/ProtonMail/gluon/rfc822"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
+	"github.com/ProtonMail/proton-bridge/v3/internal/events"
+	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/algo"
 	"github.com/bradenaw/juniper/iterator"
 	"github.com/bradenaw/juniper/xslices"
 	"github.com/cucumber/godog"
 	"github.com/google/uuid"
-	"golang.org/x/exp/slices"
 )
 
 func (s *scenario) thereExistsAnAccountWithUsernameAndPassword(username, password string) error {
@@ -51,7 +54,7 @@ func (s *scenario) theAccountHasAdditionalDisabledAddress(username, address stri
 }
 
 func (s *scenario) theAccountHasAdditionalAddressWithoutKeys(username, address string) error {
-	userID := s.t.getUserID(username)
+	userID := s.t.getUserByName(username).getUserID()
 
 	// Decrypt the user's encrypted ID for use with quark.
 	userDecID, err := s.t.runQuarkCmd(context.Background(), "encryption:id", "--decrypt", userID)
@@ -64,7 +67,8 @@ func (s *scenario) theAccountHasAdditionalAddressWithoutKeys(username, address s
 		context.Background(),
 		"user:create:address",
 		string(userDecID),
-		s.t.getUserPass(userID),
+		s.t.getUserByID(userID).getUserPass(),
+
 		address,
 	); err != nil {
 		return err
@@ -77,15 +81,15 @@ func (s *scenario) theAccountHasAdditionalAddressWithoutKeys(username, address s
 		}
 
 		// Set the new address of the user.
-		s.t.setUserAddr(userID, addr[len(addr)-1].ID, address)
+		s.t.getUserByID(userID).addAddress(addr[len(addr)-1].ID, address)
 
 		return nil
 	})
 }
 
 func (s *scenario) theAccountNoLongerHasAdditionalAddress(username, address string) error {
-	userID := s.t.getUserID(username)
-	addrID := s.t.getUserAddrID(userID, address)
+	userID := s.t.getUserByName(username).getUserID()
+	addrID := s.t.getUserByName(username).getAddrID(address)
 
 	if err := s.t.withClient(context.Background(), username, func(ctx context.Context, c *proton.Client) error {
 		if err := c.DisableAddress(ctx, addrID); err != nil {
@@ -97,7 +101,7 @@ func (s *scenario) theAccountNoLongerHasAdditionalAddress(username, address stri
 		return err
 	}
 
-	s.t.unsetUserAddr(userID, addrID)
+	s.t.getUserByID(userID).remAddress(addrID)
 
 	return nil
 }
@@ -183,21 +187,13 @@ func (s *scenario) theAddressOfAccountHasTheFollowingMessagesInMailbox(address, 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	userID := s.t.getUserID(username)
-	addrID := s.t.getUserAddrID(userID, address)
+	userID := s.t.getUserByName(username).getUserID()
+	addrID := s.t.getUserByName(username).getAddrID(address)
 	mboxID := s.t.getMBoxID(userID, mailbox)
 
 	wantMessages, err := unmarshalTable[Message](table)
 	if err != nil {
 		return err
-	}
-
-	var messageFlags proton.MessageFlag
-
-	if !strings.EqualFold(mailbox, "Sent") {
-		messageFlags = proton.MessageFlagReceived
-	} else {
-		messageFlags = proton.MessageFlagSent
 	}
 
 	return s.t.createMessages(ctx, username, addrID, xslices.Map(wantMessages, func(message Message) proton.ImportReq {
@@ -207,7 +203,7 @@ func (s *scenario) theAddressOfAccountHasTheFollowingMessagesInMailbox(address, 
 				AddressID: addrID,
 				LabelIDs:  []string{mboxID},
 				Unread:    proton.Bool(message.Unread),
-				Flags:     messageFlags,
+				Flags:     flagsForMailbox(mailbox),
 			},
 			Message: message.Build(),
 		}
@@ -218,8 +214,8 @@ func (s *scenario) theAddressOfAccountHasMessagesInMailbox(address, username str
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	userID := s.t.getUserID(username)
-	addrID := s.t.getUserAddrID(userID, address)
+	userID := s.t.getUserByName(username).getUserID()
+	addrID := s.t.getUserByName(username).getAddrID(address)
 	mboxID := s.t.getMBoxID(userID, mailbox)
 
 	return s.t.createMessages(ctx, username, addrID, iterator.Collect(iterator.Map(iterator.Counter(count), func(idx int) proton.ImportReq {
@@ -227,7 +223,7 @@ func (s *scenario) theAddressOfAccountHasMessagesInMailbox(address, username str
 			Metadata: proton.ImportMetadata{
 				AddressID: addrID,
 				LabelIDs:  []string{mboxID},
-				Flags:     proton.MessageFlagReceived,
+				Flags:     flagsForMailbox(mailbox),
 			},
 			Message: Message{
 				Subject: fmt.Sprintf("%d", idx),
@@ -237,6 +233,18 @@ func (s *scenario) theAddressOfAccountHasMessagesInMailbox(address, username str
 			}.Build(),
 		}
 	})))
+}
+
+func flagsForMailbox(mailboxName string) proton.MessageFlag {
+	if strings.EqualFold(mailboxName, "Sent") {
+		return proton.MessageFlagSent
+	}
+
+	if strings.EqualFold(mailboxName, "Scheduled") {
+		return proton.MessageFlagScheduledSend
+	}
+
+	return proton.MessageFlagReceived
 }
 
 // accountDraftChanged changes the draft attributes, where draftIndex is
@@ -261,12 +269,15 @@ func (s *scenario) theFollowingFieldsWereChangedInDraftForAddressOfAccount(draft
 	defer cancel()
 
 	return s.t.withClient(ctx, username, func(ctx context.Context, c *proton.Client) error {
-		return s.t.withAddrKR(ctx, c, username, s.t.getUserAddrID(s.t.getUserID(username), address), func(_ context.Context, addrKR *crypto.KeyRing) error {
+		return s.t.withAddrKR(ctx, c, username, s.t.getUserByName(username).getAddrID(address), func(_ context.Context, addrKR *crypto.KeyRing) error {
 			var changes proton.DraftTemplate
 
 			if wantMessages[0].From != "" {
-				return fmt.Errorf("changing from address is not supported")
+				return fmt.Errorf("changing From address is not supported")
 			}
+
+			changes.Sender = &mail.Address{Address: address}
+			changes.MIMEType = rfc822.TextPlain
 
 			if wantMessages[0].To != "" {
 				changes.ToList = []*mail.Address{{Address: wantMessages[0].To}}
@@ -297,12 +308,51 @@ func (s *scenario) theFollowingFieldsWereChangedInDraftForAddressOfAccount(draft
 	})
 }
 
+func (s *scenario) drafAtIndexWasMovedToTrashForAddressOfAccount(draftIndex int, address, username string) error {
+	draftID, err := s.t.getDraftID(username, draftIndex)
+	if err != nil {
+		return fmt.Errorf("failed to get draft ID: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	return s.t.withClient(ctx, username, func(ctx context.Context, c *proton.Client) error {
+		return s.t.withAddrKR(ctx, c, username, s.t.getUserByName(username).getAddrID(address), func(_ context.Context, addrKR *crypto.KeyRing) error {
+			if err := c.UnlabelMessages(ctx, []string{draftID}, proton.DraftsLabel); err != nil {
+				return fmt.Errorf("failed to unlabel draft")
+			}
+			if err := c.LabelMessages(ctx, []string{draftID}, proton.TrashLabel); err != nil {
+				return fmt.Errorf("failed to label draft to trah")
+			}
+
+			return nil
+		})
+	})
+}
+
 func (s *scenario) userLogsInWithUsernameAndPassword(username, password string) error {
+	smtpEvtCh, cancelSMTP := s.t.bridge.GetEvents(events.SMTPServerReady{})
+	defer cancelSMTP()
+	imapEvtCh, cancelIMAP := s.t.bridge.GetEvents(events.IMAPServerReady{})
+	defer cancelIMAP()
+
 	userID, err := s.t.bridge.LoginFull(context.Background(), username, []byte(password), nil, nil)
 	if err != nil {
 		s.t.pushError(err)
 	} else {
-		if userID != s.t.getUserID(username) {
+		// We need to wait for server to be up or we won't be able to connect. It should only happen once to avoid
+		// blocking on multiple Logins.
+		if !s.t.imapServerStarted {
+			<-imapEvtCh
+			s.t.imapServerStarted = true
+		}
+		if !s.t.smtpServerStarted {
+			<-smtpEvtCh
+			s.t.smtpServerStarted = true
+		}
+
+		if userID != s.t.getUserByName(username).getUserID() {
 			return errors.New("user ID mismatch")
 		}
 
@@ -311,18 +361,18 @@ func (s *scenario) userLogsInWithUsernameAndPassword(username, password string) 
 			return err
 		}
 
-		s.t.setUserBridgePass(userID, info.BridgePass)
+		s.t.getUserByID(userID).setBridgePass(string(info.BridgePass))
 	}
 
 	return nil
 }
 
 func (s *scenario) userLogsOut(username string) error {
-	return s.t.bridge.LogoutUser(context.Background(), s.t.getUserID(username))
+	return s.t.bridge.LogoutUser(context.Background(), s.t.getUserByName(username).getUserID())
 }
 
 func (s *scenario) userIsDeleted(username string) error {
-	return s.t.bridge.DeleteUser(context.Background(), s.t.getUserID(username))
+	return s.t.bridge.DeleteUser(context.Background(), s.t.getUserByName(username).getUserID())
 }
 
 func (s *scenario) theAuthOfUserIsRevoked(username string) error {
@@ -332,7 +382,7 @@ func (s *scenario) theAuthOfUserIsRevoked(username string) error {
 }
 
 func (s *scenario) userIsListedAndConnected(username string) error {
-	user, err := s.t.bridge.GetUserInfo(s.t.getUserID(username))
+	user, err := s.t.bridge.GetUserInfo(s.t.getUserByName(username).getUserID())
 	if err != nil {
 		return err
 	}
@@ -355,7 +405,7 @@ func (s *scenario) userIsEventuallyListedAndConnected(username string) error {
 }
 
 func (s *scenario) userIsListedButNotConnected(username string) error {
-	user, err := s.t.bridge.GetUserInfo(s.t.getUserID(username))
+	user, err := s.t.bridge.GetUserInfo(s.t.getUserByName(username).getUserID())
 	if err != nil {
 		return err
 	}
@@ -372,7 +422,7 @@ func (s *scenario) userIsListedButNotConnected(username string) error {
 }
 
 func (s *scenario) userIsNotListed(username string) error {
-	if slices.Contains(s.t.bridge.GetUserIDs(), s.t.getUserID(username)) {
+	if _, err := s.t.bridge.QueryUserInfo(username); !errors.Is(err, bridge.ErrNoSuchUser) {
 		return errors.New("user listed")
 	}
 
@@ -383,8 +433,51 @@ func (s *scenario) userFinishesSyncing(username string) error {
 	return s.bridgeSendsSyncStartedAndFinishedEventsForUser(username)
 }
 
+func (s *scenario) userHasTelemetrySetTo(username string, telemetry int) error {
+	return s.t.withClientPass(context.Background(), username, s.t.getUserByName(username).userPass, func(ctx context.Context, c *proton.Client) error {
+		var req proton.SetTelemetryReq
+		req.Telemetry = proton.SettingsBool(telemetry)
+		_, err := c.SetUserSettingsTelemetry(ctx, req)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (s *scenario) bridgePasswordOfUserIsChangedTo(username, bridgePassword string) error {
+	b, err := algo.B64RawDecode([]byte(bridgePassword))
+	if err != nil {
+		return errors.New("the password is not base64 encoded")
+	}
+
+	var setErr error
+	if err := s.t.vault.GetUser(
+		s.t.getUserByName(username).getUserID(),
+		func(user *vault.User) { setErr = user.SetBridgePass(b) },
+	); err != nil {
+		return err
+	}
+
+	return setErr
+}
+
+func (s *scenario) bridgePasswordOfUserIsEqualTo(username, bridgePassword string) error {
+	userInfo, err := s.t.bridge.QueryUserInfo(username)
+	if err != nil {
+		return err
+	}
+
+	readPassword := string(userInfo.BridgePass)
+	if readPassword != bridgePassword {
+		return fmt.Errorf("bridge password mismatch, expected '%v', got '%v'", bridgePassword, readPassword)
+	}
+
+	return nil
+}
+
 func (s *scenario) addAdditionalAddressToAccount(username, address string, disabled bool) error {
-	userID := s.t.getUserID(username)
+	userID := s.t.getUserByName(username).getUserID()
 
 	// Decrypt the user's encrypted ID for use with quark.
 	userDecID, err := s.t.runQuarkCmd(context.Background(), "encryption:id", "--decrypt", userID)
@@ -402,7 +495,7 @@ func (s *scenario) addAdditionalAddressToAccount(username, address string, disab
 
 	args = append(args,
 		string(userDecID),
-		s.t.getUserPass(userID),
+		s.t.getUserByID(userID).getUserPass(),
 		address,
 	)
 
@@ -422,7 +515,7 @@ func (s *scenario) addAdditionalAddressToAccount(username, address string, disab
 		}
 
 		// Set the new address of the user.
-		s.t.setUserAddr(userID, addr[len(addr)-1].ID, address)
+		s.t.getUserByID(userID).addAddress(addr[len(addr)-1].ID, address)
 
 		return nil
 	})
@@ -465,7 +558,7 @@ func (s *scenario) createUserAccount(username, password string, disabled bool) e
 		if _, err := s.t.runQuarkCmd(
 			context.Background(),
 			"user:create:subscription",
-			"--planID", "plus",
+			"--planID", "visionary2022",
 			string(userDecID),
 		); err != nil {
 			return err
@@ -476,15 +569,103 @@ func (s *scenario) createUserAccount(username, password string, disabled bool) e
 			return err
 		}
 
-		// Set the ID of the user.
-		s.t.setUserID(username, user.ID)
-
-		// Set the password of the user.
-		s.t.setUserPass(user.ID, password)
+		// Add the test user.
+		s.t.addUser(user.ID, username, password)
 
 		// Set the address of the user.
-		s.t.setUserAddr(user.ID, addr[0].ID, addr[0].Email)
+		s.t.getUserByID(user.ID).addAddress(addr[0].ID, addr[0].Email)
 
 		return nil
 	})
+}
+
+func (s *scenario) accountHasPublicKeyAttachment(account, enabled string) error {
+	value := true
+	switch {
+	case enabled == "enabled":
+		value = true
+	case enabled == "disabled":
+		value = false
+	default:
+		return errors.New("parameter should either be 'enabled' or 'disabled'")
+	}
+
+	return s.t.withClient(context.Background(), account, func(ctx context.Context, c *proton.Client) error {
+		_, err := c.SetAttachPublicKey(ctx, proton.SetAttachPublicKeyReq{AttachPublicKey: proton.Bool(value)})
+		return err
+	})
+}
+
+func (s *scenario) accountHasSignExternalMessages(account, enabled string) error {
+	value := proton.SignExternalMessagesDisabled
+	switch {
+	case enabled == "enabled":
+		value = proton.SignExternalMessagesEnabled
+	case enabled == "disabled":
+		value = proton.SignExternalMessagesDisabled
+	default:
+		return errors.New("parameter should either be 'enabled' or 'disabled'")
+	}
+	return s.t.withClient(context.Background(), account, func(ctx context.Context, c *proton.Client) error {
+		_, err := c.SetSignExternalMessages(ctx, proton.SetSignExternalMessagesReq{Sign: value})
+		return err
+	})
+}
+
+func (s *scenario) accountHasDefaultDraftFormat(account, format string) error {
+	value := rfc822.TextPlain
+	switch {
+	case format == "plain":
+		value = rfc822.TextPlain
+	case format == "HTML":
+		value = rfc822.TextHTML
+	default:
+		return errors.New("parameter should either be 'plain' or 'HTML'")
+	}
+	return s.t.withClient(context.Background(), account, func(ctx context.Context, c *proton.Client) error {
+		_, err := c.SetDraftMIMEType(ctx, proton.SetDraftMIMETypeReq{MIMEType: value})
+		return err
+	})
+}
+
+func (s *scenario) accountHasDefaultPGPSchema(account, schema string) error {
+	value := proton.PGPInlineScheme
+	switch {
+	case schema == "inline":
+		value = proton.PGPInlineScheme
+	case schema == "MIME":
+		value = proton.PGPMIMEScheme
+	default:
+		return errors.New("parameter should either be 'inline' or 'MIME'")
+	}
+	return s.t.withClient(context.Background(), account, func(ctx context.Context, c *proton.Client) error {
+		_, err := c.SetDefaultPGPScheme(ctx, proton.SetDefaultPGPSchemeReq{PGPScheme: value})
+		return err
+	})
+}
+
+func (s *scenario) accountMatchesSettings(account string, table *godog.Table) error {
+	return s.t.withClient(context.Background(), account, func(ctx context.Context, c *proton.Client) error {
+		wantSettings, err := unmarshalTable[MailSettings](table)
+		if err != nil {
+			return err
+		}
+		settings, err := c.GetMailSettings(ctx)
+		if err != nil {
+			return err
+		}
+		if len(wantSettings) != 1 {
+			return errors.New("this step only supports one settings definition at a time")
+		}
+
+		return matchSettings(settings, wantSettings[0])
+	})
+}
+
+func matchSettings(have proton.MailSettings, want MailSettings) error {
+	if !IsSub(ToAny(have), ToAny(want)) {
+		return fmt.Errorf("missing mailsettings: have %#v, want %#v", have, want)
+	}
+
+	return nil
 }

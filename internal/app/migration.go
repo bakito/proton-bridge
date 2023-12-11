@@ -87,6 +87,11 @@ func migrateOldSettings(v *vault.Vault) error {
 		return fmt.Errorf("failed to get user config dir: %w", err)
 	}
 
+	return migrateOldSettingsWithDir(configDir, v)
+}
+
+// nolint:gosec
+func migrateOldSettingsWithDir(configDir string, v *vault.Vault) error {
 	b, err := os.ReadFile(filepath.Join(configDir, "protonmail", "bridge", "prefs.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -94,10 +99,30 @@ func migrateOldSettings(v *vault.Vault) error {
 		return fmt.Errorf("failed to read old prefs file: %w", err)
 	}
 
-	return migratePrefsToVault(v, b)
+	if err := migratePrefsToVault(v, b); err != nil {
+		return fmt.Errorf("failed to migrate prefs to vault: %w", err)
+	}
+
+	logrus.Info("Migrating TLS certificate")
+
+	certPEM, err := os.ReadFile(filepath.Join(configDir, "protonmail", "bridge", "cert.pem"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to read old cert file: %w", err)
+	}
+
+	keyPEM, err := os.ReadFile(filepath.Join(configDir, "protonmail", "bridge", "key.pem"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to read old key file: %w", err)
+	}
+
+	return v.SetBridgeTLSCertKey(certPEM, keyPEM)
 }
 
-func migrateOldAccounts(locations *locations.Locations, v *vault.Vault) error {
+func migrateOldAccounts(locations *locations.Locations, keychains *keychain.List, v *vault.Vault) error {
 	logrus.Info("Migrating accounts")
 
 	settings, err := locations.ProvideSettingsPath()
@@ -109,8 +134,7 @@ func migrateOldAccounts(locations *locations.Locations, v *vault.Vault) error {
 	if err != nil {
 		return fmt.Errorf("failed to get helper: %w", err)
 	}
-
-	keychain, err := keychain.NewKeychain(helper, "bridge")
+	keychain, err := keychain.NewKeychain(helper, "bridge", keychains.GetHelpers(), keychains.GetDefaultHelper())
 	if err != nil {
 		return fmt.Errorf("failed to create keychain: %w", err)
 	}
@@ -147,7 +171,12 @@ func migrateOldAccount(userID string, store *credentials.Store, v *vault.Vault) 
 		return fmt.Errorf("failed to split api token for user %q: %w", userID, err)
 	}
 
-	user, err := v.AddUser(creds.UserID, creds.Name, authUID, authRef, creds.MailboxPassword)
+	var primaryEmail string
+	if len(creds.EmailList()) > 0 {
+		primaryEmail = creds.EmailList()[0]
+	}
+
+	user, err := v.AddUser(creds.UserID, creds.Name, primaryEmail, authUID, authRef, creds.MailboxPassword)
 	if err != nil {
 		return fmt.Errorf("failed to add user %q: %w", userID, err)
 	}
@@ -182,7 +211,6 @@ func migrateOldAccount(userID string, store *credentials.Store, v *vault.Vault) 
 	return nil
 }
 
-// nolint:funlen
 func migratePrefsToVault(vault *vault.Vault, b []byte) error {
 	var prefs struct {
 		IMAPPort int  `json:"user_port_imap,,string"`
@@ -193,11 +221,10 @@ func migratePrefsToVault(vault *vault.Vault, b []byte) error {
 		UpdateChannel updater.Channel `json:"update_channel"`
 		UpdateRollout float64         `json:"rollout,,string"`
 
-		FirstStart    bool            `json:"first_time_start,,string"`
-		FirstStartGUI bool            `json:"first_time_start_gui,,string"`
-		ColorScheme   string          `json:"color_scheme"`
-		LastVersion   *semver.Version `json:"last_used_version"`
-		Autostart     bool            `json:"autostart,,string"`
+		FirstStart  bool            `json:"first_time_start,,string"`
+		ColorScheme string          `json:"color_scheme"`
+		LastVersion *semver.Version `json:"last_used_version"`
+		Autostart   bool            `json:"autostart,,string"`
 
 		AllowProxy        bool `json:"allow_proxy,,string"`
 		FetchWorkers      int  `json:"fetch_workers,,string"`
@@ -241,10 +268,6 @@ func migratePrefsToVault(vault *vault.Vault, b []byte) error {
 		errs = multierror.Append(errs, fmt.Errorf("failed to migrate first start: %w", err))
 	}
 
-	if err := vault.SetFirstStartGUI(prefs.FirstStartGUI); err != nil {
-		errs = multierror.Append(errs, fmt.Errorf("failed to migrate first start GUI: %w", err))
-	}
-
 	if err := vault.SetColorScheme(prefs.ColorScheme); err != nil {
 		errs = multierror.Append(errs, fmt.Errorf("failed to migrate color scheme: %w", err))
 	}
@@ -263,14 +286,6 @@ func migratePrefsToVault(vault *vault.Vault, b []byte) error {
 
 	if err := vault.SetShowAllMail(prefs.ShowAllMail); err != nil {
 		errs = multierror.Append(errs, fmt.Errorf("failed to migrate show all mail: %w", err))
-	}
-
-	if err := vault.SetSyncWorkers(prefs.FetchWorkers); err != nil {
-		errs = multierror.Append(errs, fmt.Errorf("failed to migrate sync workers: %w", err))
-	}
-
-	if err := vault.SetSyncAttPool(prefs.AttachmentWorkers); err != nil {
-		errs = multierror.Append(errs, fmt.Errorf("failed to migrate sync attachment pool: %w", err))
 	}
 
 	if err := vault.SetCookies([]byte(prefs.Cookies)); err != nil {

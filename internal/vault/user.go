@@ -20,7 +20,6 @@ package vault
 import (
 	"fmt"
 
-	"github.com/ProtonMail/gluon/imap"
 	"github.com/bradenaw/juniper/xslices"
 	"golang.org/x/exp/slices"
 )
@@ -36,6 +35,18 @@ func (user *User) UserID() string {
 
 func (user *User) Username() string {
 	return user.vault.getUser(user.userID).Username
+}
+
+// PrimaryEmail returns the user's primary email address.
+func (user *User) PrimaryEmail() string {
+	return user.vault.getUser(user.userID).PrimaryEmail
+}
+
+// SetPrimaryEmail sets the user's primary email address.
+func (user *User) SetPrimaryEmail(email string) error {
+	return user.vault.modUser(user.userID, func(data *UserData) {
+		data.PrimaryEmail = email
+	})
 }
 
 // GluonKey returns the key needed to decrypt the user's gluon database.
@@ -67,24 +78,6 @@ func (user *User) RemoveGluonID(addrID, gluonID string) error {
 	}
 
 	return err
-}
-
-func (user *User) GetUIDValidity(addrID string) imap.UID {
-	if validity, ok := user.vault.getUser(user.userID).UIDValidity[addrID]; ok {
-		return validity
-	}
-
-	if err := user.SetUIDValidity(addrID, 1000); err != nil {
-		panic(err)
-	}
-
-	return user.GetUIDValidity(addrID)
-}
-
-func (user *User) SetUIDValidity(addrID string, validity imap.UID) error {
-	return user.vault.modUser(user.userID, func(data *UserData) {
-		data.UIDValidity[addrID] = validity
-	})
 }
 
 // AddressMode returns the user's address mode.
@@ -126,6 +119,14 @@ func (user *User) SetAuth(authUID, authRef string) error {
 	return user.vault.modUser(user.userID, func(data *UserData) {
 		data.AuthUID = authUID
 		data.AuthRef = authRef
+	})
+}
+
+func (user *User) setAuthAndKeyPassUnsafe(authUID, authRef string, keyPass []byte) error {
+	return user.vault.modUserUnsafe(user.userID, func(userData *UserData) {
+		userData.AuthRef = authRef
+		userData.AuthUID = authUID
+		userData.KeyPass = keyPass
 	})
 }
 
@@ -185,16 +186,24 @@ func (user *User) RemFailedMessageID(messageID string) error {
 	})
 }
 
-// ClearSyncStatus clears the user's sync status.
-func (user *User) ClearSyncStatus() error {
+// GetSyncStatusDeprecated returns the user's sync status.
+func (user *User) GetSyncStatusDeprecated() SyncStatus {
+	return user.vault.getUser(user.userID).SyncStatus
+}
+
+// ClearSyncStatusDeprecated clears the user's sync status.
+func (user *User) ClearSyncStatusDeprecated() error {
 	return user.vault.modUser(user.userID, func(data *UserData) {
 		data.SyncStatus = SyncStatus{}
 
 		data.EventID = ""
+	})
+}
 
-		for addrID := range data.UIDValidity {
-			data.UIDValidity[addrID]++
-		}
+// ClearSyncStatusWithoutEventID clears the user's sync status without modifying EventID.
+func (user *User) ClearSyncStatusWithoutEventID() error {
+	return user.vault.modUser(user.userID, func(data *UserData) {
+		data.SyncStatus = SyncStatus{}
 	})
 }
 

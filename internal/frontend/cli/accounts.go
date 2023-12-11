@@ -23,6 +23,7 @@ import (
 
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
+	"github.com/ProtonMail/proton-bridge/v3/internal/certs"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/abiosoft/ishell"
@@ -115,7 +116,7 @@ func (f *frontendCLI) showAccountAddressInfo(user bridge.UserInfo, address strin
 	f.Println("")
 }
 
-func (f *frontendCLI) loginAccount(c *ishell.Context) { //nolint:funlen
+func (f *frontendCLI) loginAccount(c *ishell.Context) {
 	f.ShowPrompt(false)
 	defer f.ShowPrompt(true)
 
@@ -297,10 +298,48 @@ func (f *frontendCLI) configureAppleMail(c *ishell.Context) {
 		return
 	}
 
-	if err := f.bridge.ConfigureAppleMail(user.UserID, user.Addresses[0]); err != nil {
+	cert, _ := f.bridge.GetBridgeTLSCert()
+	installer := certs.NewInstaller()
+	if !installer.IsCertInstalled(cert) {
+		f.Println("Apple Mail requires that a TLS certificate for bridge IMAP and SMTP server is installed in your system keychain.")
+		f.Println("Please provide your credentials in the system popup dialog in order to continue.")
+		if err := installer.InstallCert(cert); err != nil {
+			f.printAndLogError(err)
+			return
+		}
+	}
+
+	if err := f.bridge.ConfigureAppleMail(context.Background(), user.UserID, user.Addresses[0]); err != nil {
 		f.printAndLogError(err)
 		return
 	}
 
 	f.Printf("Apple Mail configured for %v with address %v\n", user.Username, user.Addresses[0])
+}
+
+func (f *frontendCLI) badEventSynchronize(_ *ishell.Context) {
+	f.badEventFeedback(true)
+}
+
+func (f *frontendCLI) badEventLogout(_ *ishell.Context) {
+	f.badEventFeedback(false)
+}
+
+func (f *frontendCLI) badEventFeedback(doResync bool) {
+	if f.badUserID == "" {
+		f.Printf("Error: There was no unresolved bad event.")
+		return
+	}
+
+	action := "synchronize"
+	if !doResync {
+		action = "logout"
+	}
+
+	if err := f.bridge.SendBadEventUserFeedback(context.Background(), f.badUserID, doResync); err != nil {
+		f.Printf("Error: failed to send %s feedback: %w", action, err)
+		return
+	}
+
+	f.badUserID = ""
 }

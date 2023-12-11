@@ -26,12 +26,13 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ProtonMail/gluon/rfc5322"
 	"github.com/ProtonMail/gluon/rfc822"
 	"github.com/ProtonMail/go-proton-api"
-	"github.com/ProtonMail/go-rfc5322"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/message/parser"
 	pmmime "github.com/ProtonMail/proton-bridge/v3/pkg/mime"
 	"github.com/emersion/go-message"
+	"github.com/google/uuid"
 	"github.com/jaytaylor/html2text"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -59,6 +60,7 @@ type Message struct {
 	References []string
 	ExternalID string
 	InReplyTo  string
+	XForward   string
 }
 
 type Attachment struct {
@@ -66,12 +68,22 @@ type Attachment struct {
 	Name        string
 	ContentID   string
 	MIMEType    string
-	Disposition string
+	MIMEParams  map[string]string
+	Disposition proton.Disposition
 	Data        []byte
 }
 
 // Parse parses an RFC822 message.
 func Parse(r io.Reader) (m Message, err error) {
+	return parseIOReaderImpl(r, false)
+}
+
+// ParseAndAllowInvalidAddressLists parses an RFC822 message and allows email address lists to be invalid.
+func ParseAndAllowInvalidAddressLists(r io.Reader) (m Message, err error) {
+	return parseIOReaderImpl(r, true)
+}
+
+func parseIOReaderImpl(r io.Reader, allowInvalidAddressLists bool) (m Message, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic while parsing message: %v", r)
@@ -83,21 +95,21 @@ func Parse(r io.Reader) (m Message, err error) {
 		return Message{}, errors.Wrap(err, "failed to create new parser")
 	}
 
-	return parse(p)
+	return parse(p, allowInvalidAddressLists)
 }
 
 // ParseWithParser parses an RFC822 message using an existing parser.
-func ParseWithParser(p *parser.Parser) (m Message, err error) {
+func ParseWithParser(p *parser.Parser, allowInvalidAddressLists bool) (m Message, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic while parsing message: %v", r)
 		}
 	}()
 
-	return parse(p)
+	return parse(p, allowInvalidAddressLists)
 }
 
-func parse(p *parser.Parser) (Message, error) {
+func parse(p *parser.Parser, allowInvalidAddressLists bool) (Message, error) {
 	if err := convertEncodedTransferEncoding(p); err != nil {
 		return Message{}, errors.Wrap(err, "failed to convert encoded transfer encoding")
 	}
@@ -106,7 +118,11 @@ func parse(p *parser.Parser) (Message, error) {
 		return Message{}, errors.Wrap(err, "failed to convert foreign encodings")
 	}
 
-	m, err := parseMessageHeader(p.Root().Header)
+	if err := patchInlineImages(p); err != nil {
+		return Message{}, err
+	}
+
+	m, err := parseMessageHeader(p.Root().Header, allowInvalidAddressLists)
 	if err != nil {
 		return Message{}, errors.Wrap(err, "failed to parse message header")
 	}
@@ -132,7 +148,7 @@ func parse(p *parser.Parser) (Message, error) {
 	m.PlainBody = Body(plainBody)
 	m.MIMEBody = MIMEBody(mimeBody)
 
-	mimeType, err := determineMIMEType(p)
+	mimeType, err := determineBodyMIMEType(p)
 	if err != nil {
 		return Message{}, errors.Wrap(err, "failed to get mime type")
 	}
@@ -298,24 +314,14 @@ func collectBodyParts(p *parser.Parser, preferredContentType string) (parser.Par
 			return bestChoice(childParts, preferredContentType), nil
 		}).
 		RegisterRule("text/plain", func(p *parser.Part, visit parser.Visit) (interface{}, error) {
-			disp, _, err := p.Header.ContentDisposition()
-			if err != nil {
-				disp = ""
-			}
-
-			if disp == "attachment" {
+			if p.IsAttachment() {
 				return parser.Parts{}, nil
 			}
 
 			return parser.Parts{p}, nil
 		}).
 		RegisterRule("text/html", func(p *parser.Part, visit parser.Visit) (interface{}, error) {
-			disp, _, err := p.Header.ContentDisposition()
-			if err != nil {
-				disp = ""
-			}
-
-			if disp == "attachment" {
+			if p.IsAttachment() {
 				return parser.Parts{}, nil
 			}
 
@@ -390,7 +396,7 @@ func allPartsHaveContentType(parts parser.Parts, contentType string) bool {
 	return true
 }
 
-func determineMIMEType(p *parser.Parser) (string, error) {
+func determineBodyMIMEType(p *parser.Parser) (string, error) {
 	var isHTML bool
 
 	w := p.NewWalker().
@@ -399,7 +405,7 @@ func determineMIMEType(p *parser.Parser) (string, error) {
 			return
 		})
 
-	if err := w.Walk(); err != nil {
+	if err := w.WalkSkipAttachment(); err != nil {
 		return "", err
 	}
 
@@ -432,7 +438,7 @@ func getPlainBody(part *parser.Part) []byte {
 	}
 }
 
-func parseMessageHeader(h message.Header) (Message, error) { //nolint:funlen
+func parseMessageHeader(h message.Header, allowInvalidAddressLists bool) (Message, error) {
 	var m Message
 
 	for fields := h.Fields(); fields.Next(); {
@@ -450,7 +456,11 @@ func parseMessageHeader(h message.Header) (Message, error) { //nolint:funlen
 		case "from":
 			sender, err := rfc5322.ParseAddressList(fields.Value())
 			if err != nil {
-				return Message{}, errors.Wrap(err, "failed to parse from")
+				if !allowInvalidAddressLists {
+					return Message{}, errors.Wrap(err, "failed to parse from")
+				}
+
+				logrus.WithError(err).Warn("failed to parse from")
 			}
 
 			if len(sender) > 0 {
@@ -460,7 +470,11 @@ func parseMessageHeader(h message.Header) (Message, error) { //nolint:funlen
 		case "to":
 			toList, err := rfc5322.ParseAddressList(fields.Value())
 			if err != nil {
-				return Message{}, errors.Wrap(err, "failed to parse to")
+				if !allowInvalidAddressLists {
+					return Message{}, errors.Wrap(err, "failed to parse to")
+				}
+
+				logrus.WithError(err).Warn("failed to parse to")
 			}
 
 			m.ToList = toList
@@ -468,7 +482,11 @@ func parseMessageHeader(h message.Header) (Message, error) { //nolint:funlen
 		case "reply-to":
 			replyTos, err := rfc5322.ParseAddressList(fields.Value())
 			if err != nil {
-				return Message{}, errors.Wrap(err, "failed to parse reply-to")
+				if !allowInvalidAddressLists {
+					return Message{}, errors.Wrap(err, "failed to parse reply-to")
+				}
+
+				logrus.WithError(err).Warn("failed to parse reply-to")
 			}
 
 			m.ReplyTos = replyTos
@@ -476,7 +494,11 @@ func parseMessageHeader(h message.Header) (Message, error) { //nolint:funlen
 		case "cc":
 			ccList, err := rfc5322.ParseAddressList(fields.Value())
 			if err != nil {
-				return Message{}, errors.Wrap(err, "failed to parse cc")
+				if !allowInvalidAddressLists {
+					return Message{}, errors.Wrap(err, "failed to parse cc")
+				}
+
+				logrus.WithError(err).Warn("failed to parse cc")
 			}
 
 			m.CCList = ccList
@@ -484,7 +506,11 @@ func parseMessageHeader(h message.Header) (Message, error) { //nolint:funlen
 		case "bcc":
 			bccList, err := rfc5322.ParseAddressList(fields.Value())
 			if err != nil {
-				return Message{}, errors.Wrap(err, "failed to parse bcc")
+				if !allowInvalidAddressLists {
+					return Message{}, errors.Wrap(err, "failed to parse bcc")
+				}
+
+				logrus.WithError(err).Warn("failed to parse bcc")
 			}
 
 			m.BCCList = bccList
@@ -494,6 +520,9 @@ func parseMessageHeader(h message.Header) (Message, error) { //nolint:funlen
 
 		case "in-reply-to":
 			m.InReplyTo = regexp.MustCompile("<(.*)>").ReplaceAllString(fields.Value(), "$1")
+
+		case "x-forwarded-message-id":
+			m.XForward = regexp.MustCompile("<(.*)>").ReplaceAllString(fields.Value(), "$1")
 
 		case "references":
 			for _, ref := range strings.Fields(fields.Value()) {
@@ -517,18 +546,20 @@ func parseAttachment(h message.Header, body []byte) (Attachment, error) {
 		return Attachment{}, err
 	}
 	att.Header = mimeHeader
+	mimeType, mimeTypeParams, err := pmmime.ParseMediaType(h.Get("Content-Type"))
 
-	mimeType, mimeTypeParams, err := h.ContentType()
 	if err != nil {
 		return Attachment{}, err
 	}
 	att.MIMEType = mimeType
+	att.MIMEParams = mimeTypeParams
 
 	// Prefer attachment name from filename param in content disposition.
 	// If not available, try to get it from name param in content type.
 	// Otherwise fallback to attachment.bin.
-	if disp, dispParams, err := h.ContentDisposition(); err == nil {
-		att.Disposition = disp
+	disp, dispParams, err := pmmime.ParseMediaType(h.Get("Content-Disposition"))
+	if err == nil {
+		att.Disposition = proton.Disposition(disp)
 
 		if filename, ok := dispParams["filename"]; ok {
 			att.Name = filename
@@ -554,7 +585,7 @@ func parseAttachment(h message.Header, body []byte) (Attachment, error) {
 	// (This is necessary because some clients don't set Content-Disposition at all,
 	// so we need to rely on other information to deduce if it's inline or attachment.)
 	if h.Has("Content-Disposition") {
-		disp, _, err := h.ContentDisposition()
+		disp, _, err := pmmime.ParseMediaType(h.Get("Content-Disposition"))
 		if err != nil {
 			return Attachment{}, err
 		}
@@ -603,4 +634,169 @@ func forEachDecodedHeaderField(h message.Header, fn func(string, string) error) 
 	}
 
 	return nil
+}
+
+func patchInlineImages(p *parser.Parser) error {
+	// This code will only attempt to patch the root level children. I tested with different email clients and as soon
+	// as you reply/forward a message the entire content gets converted into HTML (Apple Mail/Thunderbird/Evolution).
+	// If you are forcing text formatting (Evolution), the inline images of the original email are stripped.
+	// The only reason we need to apply this modification is that Apple Mail can send out text + inline image parts
+	// if the text does not exceed the 76 char column limit.
+	// Based on this, it's unlikely we will see any other variations.
+	root := p.Root()
+
+	children := root.Children()
+
+	if len(children) < 2 {
+		return nil
+	}
+
+	result := make([]inlinePatchJob, len(children))
+
+	var (
+		transformationNeeded bool
+		prevPart             *parser.Part
+		prevContentType      string
+		prevContentTypeMap   map[string]string
+	)
+
+	for i := 0; i < len(children); i++ {
+		curPart := children[i]
+
+		contentType, contentTypeMap, err := curPart.ContentType()
+		if err != nil {
+			return fmt.Errorf("failed to get content type for for child %v:%w", i, err)
+		}
+
+		if rfc822.MIMEType(contentType) == rfc822.TextPlain {
+			result[i] = &inlinePatchBodyOnly{part: curPart, contentTypeMap: contentTypeMap}
+		} else if strings.HasPrefix(contentType, "image/") {
+			disposition, _, err := curPart.ContentDisposition()
+			if err != nil {
+				return fmt.Errorf("failted to get content disposition for child %v:%w", i, err)
+			}
+
+			if disposition == "inline" && !curPart.HasContentID() {
+				if rfc822.MIMEType(prevContentType) == rfc822.TextPlain {
+					result[i-1] = &inlinePatchBodyWithInlineImage{
+						textPart:           prevPart,
+						imagePart:          curPart,
+						textContentTypeMap: prevContentTypeMap,
+					}
+				} else {
+					result[i] = &inlinePatchInlineImageOnly{part: curPart, partIndex: i, root: root}
+				}
+				transformationNeeded = true
+			}
+		}
+		prevPart = curPart
+		prevContentType = contentType
+		prevContentTypeMap = contentTypeMap
+	}
+
+	if !transformationNeeded {
+		return nil
+	}
+
+	for _, t := range result {
+		if t != nil {
+			t.Patch()
+		}
+	}
+
+	return nil
+}
+
+type inlinePatchJob interface {
+	Patch()
+}
+
+// inlinePatchBodyOnly is meant to be used for standalone text parts that need to be converted to html once we applty
+// one of the changes.
+type inlinePatchBodyOnly struct {
+	part           *parser.Part
+	contentTypeMap map[string]string
+}
+
+func (i *inlinePatchBodyOnly) Patch() {
+	newBody := []byte(`<html><body><p>`)
+	newBody = append(newBody, patchNewLineWithHTMLBreaks(i.part.Body)...)
+	newBody = append(newBody, []byte(`</p></body></html>`)...)
+
+	i.part.Body = newBody
+	i.part.Header.SetContentType("text/html", i.contentTypeMap)
+}
+
+// inlinePatchBodyWithInlineImage patches a previous text part so that it refers to that inline image.
+type inlinePatchBodyWithInlineImage struct {
+	textPart           *parser.Part
+	textContentTypeMap map[string]string
+	imagePart          *parser.Part
+}
+
+// inlinePatchInlineImageOnly handle the case where the inline image is not proceeded by a text part. To avoid
+// having to parse any possible previous part, we just inject a new part that references this image.
+type inlinePatchInlineImageOnly struct {
+	part      *parser.Part
+	partIndex int
+	root      *parser.Part
+}
+
+func (i inlinePatchInlineImageOnly) Patch() {
+	contentID := uuid.NewString()
+	// Convert previous part to text/html && inject image.
+	newBody := []byte(fmt.Sprintf(`<html><body><img src="cid:%v"/></body></html>`, contentID))
+
+	i.part.Header.Set("content-id", contentID)
+
+	// create new text part
+	textPart := &parser.Part{
+		Header: message.Header{},
+		Body:   newBody,
+	}
+
+	textPart.Header.SetContentType("text/html", map[string]string{"charset": "UTF-8"})
+
+	i.root.InsertChild(i.partIndex, textPart)
+}
+
+func (i *inlinePatchBodyWithInlineImage) Patch() {
+	contentID := uuid.NewString()
+	// Convert previous part to text/html && inject image.
+	newBody := []byte(`<html><body><p>`)
+	newBody = append(newBody, patchNewLineWithHTMLBreaks(i.textPart.Body)...)
+	newBody = append(newBody, []byte(`</p>`)...)
+	newBody = append(newBody, []byte(fmt.Sprintf(`<img src="cid:%v"/>`, contentID))...)
+	newBody = append(newBody, []byte(`</body></html>`)...)
+
+	i.textPart.Body = newBody
+	i.textPart.Header.SetContentType("text/html", i.textContentTypeMap)
+
+	// Add content id to curPart
+	i.imagePart.Header.Set("content-id", contentID)
+}
+
+func patchNewLineWithHTMLBreaks(input []byte) []byte {
+	dst := make([]byte, 0, len(input))
+	index := 0
+	for {
+		slice := input[index:]
+		newLineIndex := bytes.IndexByte(slice, '\n')
+
+		if newLineIndex == -1 {
+			dst = append(dst, input[index:]...)
+			return dst
+		}
+
+		injectIndex := newLineIndex
+		if newLineIndex > 0 && slice[newLineIndex-1] == '\r' {
+			injectIndex--
+		}
+
+		dst = append(dst, slice[0:injectIndex]...)
+		dst = append(dst, '<', 'b', 'r', '/', '>')
+		dst = append(dst, slice[injectIndex:newLineIndex+1]...)
+
+		index += newLineIndex + 1
+	}
 }

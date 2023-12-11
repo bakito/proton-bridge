@@ -21,27 +21,32 @@ package bridge
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/ProtonMail/gluon"
+	"github.com/ProtonMail/gluon/async"
 	imapEvents "github.com/ProtonMail/gluon/events"
+	"github.com/ProtonMail/gluon/imap"
 	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/gluon/watcher"
 	"github.com/ProtonMail/go-proton-api"
-	"github.com/ProtonMail/proton-bridge/v3/internal/async"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/focus"
+	"github.com/ProtonMail/proton-bridge/v3/internal/identifier"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
+	"github.com/ProtonMail/proton-bridge/v3/internal/sentry"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/imapsmtpserver"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice"
+	"github.com/ProtonMail/proton-bridge/v3/internal/telemetry"
 	"github.com/ProtonMail/proton-bridge/v3/internal/user"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
+	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/bradenaw/juniper/xslices"
-	"github.com/emersion/go-smtp"
 	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
 )
@@ -57,29 +62,29 @@ type Bridge struct {
 	// api manages user API clients.
 	api        *proton.Manager
 	proxyCtl   ProxyController
-	identifier Identifier
+	identifier identifier.Identifier
 
 	// tlsConfig holds the bridge TLS config used by the IMAP and SMTP servers.
 	tlsConfig *tls.Config
 
 	// imapServer is the bridge's IMAP server.
-	imapServer   *gluon.Server
-	imapListener net.Listener
-	imapEventCh  chan imapEvents.Event
-
-	// smtpServer is the bridge's SMTP server.
-	smtpServer   *smtp.Server
-	smtpListener net.Listener
+	imapEventCh chan imapEvents.Event
 
 	// updater is the bridge's updater.
 	updater   Updater
 	installCh chan installJob
+
+	// heartbeat is the telemetry heartbeat for metrics.
+	heartbeat *heartBeatState
 
 	// curVersion is the current version of the bridge,
 	// newVersion is the version that was installed by the updater.
 	curVersion     *semver.Version
 	newVersion     *semver.Version
 	newVersionLock safe.RWMutex
+
+	// keychains is the utils that own usable keychains found in the OS.
+	keychains *keychain.List
 
 	// focusService is used to raise the bridge window when needed.
 	focusService *focus.Service
@@ -90,8 +95,8 @@ type Bridge struct {
 	// locator is the bridge's locator.
 	locator Locator
 
-	// crashHandler
-	crashHandler async.PanicHandler
+	// panicHandler
+	panicHandler async.PanicHandler
 
 	// reporter
 	reporter reporter.Reporter
@@ -108,6 +113,12 @@ type Bridge struct {
 	logIMAPServer bool
 	logSMTP       bool
 
+	// These two variables keep track of the startup values for the two settings of the same name.
+	// They are updated in the vault on startup so that we're sure they're updated in case of kill/crash,
+	// but we need to keep their initial value for the current instance of bridge.
+	firstStart  bool
+	lastVersion *semver.Version
+
 	// tasks manages the bridge's goroutines.
 	tasks *async.Group
 
@@ -116,39 +127,46 @@ type Bridge struct {
 
 	// goUpdate triggers a check/install of updates.
 	goUpdate func()
+
+	serverManager *imapsmtpserver.Service
+	syncService   *syncservice.Service
 }
 
 // New creates a new bridge.
-func New( //nolint:funlen
+func New(
 	locator Locator, // the locator to provide paths to store data
 	vault *vault.Vault, // the bridge's encrypted data store
 	autostarter Autostarter, // the autostarter to manage autostart settings
 	updater Updater, // the updater to fetch and install updates
 	curVersion *semver.Version, // the current version of the bridge
+	keychains *keychain.List, // usable keychains
 
 	apiURL string, // the URL of the API to use
 	cookieJar http.CookieJar, // the cookie jar to use
-	identifier Identifier, // the identifier to keep track of the user agent
+	identifier identifier.Identifier, // the identifier to keep track of the user agent
 	tlsReporter TLSReporter, // the TLS reporter to report TLS errors
 	roundTripper http.RoundTripper, // the round tripper to use for API requests
 	proxyCtl ProxyController, // the DoH controller
-	crashHandler async.PanicHandler,
+	panicHandler async.PanicHandler,
 	reporter reporter.Reporter,
+	uidValidityGenerator imap.UIDValidityGenerator,
+	heartBeatManager telemetry.HeartbeatManager,
 
 	logIMAPClient, logIMAPServer bool, // whether to log IMAP client/server activity
 	logSMTP bool, // whether to log SMTP activity
 ) (*Bridge, <-chan events.Event, error) {
 	// api is the user's API manager.
-	api := proton.New(newAPIOptions(apiURL, curVersion, cookieJar, roundTripper, vault.SyncAttPool())...)
+	api := proton.New(newAPIOptions(apiURL, curVersion, cookieJar, roundTripper, panicHandler)...)
 
 	// tasks holds all the bridge's background tasks.
-	tasks := async.NewGroup(context.Background(), crashHandler)
+	tasks := async.NewGroup(context.Background(), panicHandler)
 
 	// imapEventCh forwards IMAP events from gluon instances to the bridge for processing.
 	imapEventCh := make(chan imapEvents.Event)
 
 	// bridge is the bridge.
 	bridge, err := newBridge(
+		context.Background(),
 		tasks,
 		imapEventCh,
 
@@ -157,12 +175,15 @@ func New( //nolint:funlen
 		autostarter,
 		updater,
 		curVersion,
-		crashHandler,
+		keychains,
+		panicHandler,
 		reporter,
 
 		api,
 		identifier,
 		proxyCtl,
+		uidValidityGenerator,
+		heartBeatManager,
 		logIMAPClient, logIMAPServer, logSMTP,
 	)
 	if err != nil {
@@ -177,23 +198,11 @@ func New( //nolint:funlen
 		return nil, nil, fmt.Errorf("failed to initialize bridge: %w", err)
 	}
 
-	// Start serving IMAP.
-	if err := bridge.serveIMAP(); err != nil {
-		logrus.WithError(err).Error("IMAP error")
-		bridge.PushError(ErrServeIMAP)
-	}
-
-	// Start serving SMTP.
-	if err := bridge.serveSMTP(); err != nil {
-		logrus.WithError(err).Error("SMTP error")
-		bridge.PushError(ErrServeSMTP)
-	}
-
 	return bridge, eventCh, nil
 }
 
-// nolint:funlen
 func newBridge(
+	ctx context.Context,
 	tasks *async.Group,
 	imapEventCh chan imapEvents.Event,
 
@@ -202,12 +211,15 @@ func newBridge(
 	autostarter Autostarter,
 	updater Updater,
 	curVersion *semver.Version,
-	crashHandler async.PanicHandler,
+	keychains *keychain.List,
+	panicHandler async.PanicHandler,
 	reporter reporter.Reporter,
 
 	api *proton.Manager,
-	identifier Identifier,
+	identifier identifier.Identifier,
 	proxyCtl ProxyController,
+	uidValidityGenerator imap.UIDValidityGenerator,
+	heartbeatManager telemetry.HeartbeatManager,
 
 	logIMAPClient, logIMAPServer, logSMTP bool,
 ) (*Bridge, error) {
@@ -216,26 +228,19 @@ func newBridge(
 		return nil, fmt.Errorf("failed to load TLS config: %w", err)
 	}
 
-	gluonDir, err := getGluonDir(vault)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get Gluon directory: %w", err)
+	firstStart := vault.GetFirstStart()
+	if err := vault.SetFirstStart(false); err != nil {
+		return nil, fmt.Errorf("failed to save first start indicator: %w", err)
 	}
 
-	imapServer, err := newIMAPServer(
-		gluonDir,
-		curVersion,
-		tlsConfig,
-		reporter,
-		logIMAPClient,
-		logIMAPServer,
-		imapEventCh,
-		tasks,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create IMAP server: %w", err)
+	lastVersion := vault.GetLastVersion()
+	if err := vault.SetLastVersion(curVersion); err != nil {
+		return nil, fmt.Errorf("failed to save last version indicator: %w", err)
 	}
 
-	focusService, err := focus.NewService(curVersion)
+	identifier.SetClientString(vault.GetLastUserAgent())
+
+	focusService, err := focus.NewService(locator, curVersion, panicHandler)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create focus service: %w", err)
 	}
@@ -251,7 +256,6 @@ func newBridge(
 		identifier: identifier,
 
 		tlsConfig:   tlsConfig,
-		imapServer:  imapServer,
 		imapEventCh: imapEventCh,
 
 		updater:   updater,
@@ -261,8 +265,12 @@ func newBridge(
 		newVersion:     curVersion,
 		newVersionLock: safe.NewRWMutex(),
 
-		crashHandler: crashHandler,
+		keychains: keychains,
+
+		panicHandler: panicHandler,
 		reporter:     reporter,
+
+		heartbeat: newHeartBeatState(ctx, panicHandler),
 
 		focusService: focusService,
 		autostarter:  autostarter,
@@ -272,15 +280,38 @@ func newBridge(
 		logIMAPServer: logIMAPServer,
 		logSMTP:       logSMTP,
 
-		tasks: tasks,
+		firstStart:  firstStart,
+		lastVersion: lastVersion,
+
+		tasks:       tasks,
+		syncService: syncservice.NewService(reporter, panicHandler),
 	}
 
-	bridge.smtpServer = newSMTPServer(bridge, tlsConfig, logSMTP)
+	bridge.serverManager = imapsmtpserver.NewService(context.Background(),
+		&bridgeSMTPSettings{b: bridge},
+		&bridgeIMAPSettings{b: bridge},
+		&bridgeEventPublisher{b: bridge},
+		panicHandler,
+		reporter,
+		uidValidityGenerator,
+		&bridgeIMAPSMTPTelemetry{b: bridge},
+	)
+
+	if err := bridge.serverManager.Init(context.Background(), bridge.tasks, &bridgeEventSubscription{b: bridge}); err != nil {
+		return nil, err
+	}
+
+	if heartbeatManager == nil {
+		bridge.heartbeat.init(bridge, bridge)
+	} else {
+		bridge.heartbeat.init(bridge, heartbeatManager)
+	}
+
+	bridge.syncService.Run()
 
 	return bridge, nil
 }
 
-// nolint:funlen
 func (bridge *Bridge) init(tlsReporter TLSReporter) error {
 	// Enable or disable the proxy at startup.
 	if bridge.vault.GetProxyAllowed() {
@@ -349,15 +380,17 @@ func (bridge *Bridge) init(tlsReporter TLSReporter) error {
 		})
 	})
 
-	// Attempt to lazy load users when triggered.
+	// Attempt to load users from the vault when triggered.
 	bridge.goLoad = bridge.tasks.Trigger(func(ctx context.Context) {
-		logrus.Info("Loading users")
-
 		if err := bridge.loadUsers(ctx); err != nil {
 			logrus.WithError(err).Error("Failed to load users")
-		} else {
-			bridge.publish(events.AllUsersLoaded{})
+			if netErr := new(proton.NetError); !errors.As(err, &netErr) {
+				sentry.ReportError(bridge.reporter, "Failed to load users", err)
+			}
+			return
 		}
+
+		bridge.publish(events.AllUsersLoaded{})
 	})
 	defer bridge.goLoad()
 
@@ -403,22 +436,22 @@ func (bridge *Bridge) GetErrors() []error {
 func (bridge *Bridge) Close(ctx context.Context) {
 	logrus.Info("Closing bridge")
 
-	// Close the IMAP server.
-	if err := bridge.closeIMAP(ctx); err != nil {
-		logrus.WithError(err).Error("Failed to close IMAP server")
-	}
-
-	// Close the SMTP server.
-	if err := bridge.closeSMTP(); err != nil {
-		logrus.WithError(err).Error("Failed to close SMTP server")
-	}
+	// Stop heart beat before closing users.
+	bridge.heartbeat.stop()
 
 	// Close all users.
-	safe.RLock(func() {
+	safe.Lock(func() {
 		for _, user := range bridge.users {
 			user.Close()
 		}
 	}, bridge.usersLock)
+
+	// Close the servers
+	if err := bridge.serverManager.CloseServers(ctx); err != nil {
+		logrus.WithError(err).Error("Failed to close servers")
+	}
+
+	bridge.syncService.Close()
 
 	// Stop all ongoing tasks.
 	bridge.tasks.CancelAndWait()
@@ -435,11 +468,6 @@ func (bridge *Bridge) Close(ctx context.Context) {
 	}
 
 	bridge.watchers = nil
-
-	// Save the last version of bridge that was run.
-	if err := bridge.vault.SetLastVersion(bridge.curVersion); err != nil {
-		logrus.WithError(err).Error("Failed to save last version")
-	}
 }
 
 func (bridge *Bridge) publish(event events.Event) {
@@ -461,7 +489,7 @@ func (bridge *Bridge) addWatcher(ofType ...events.Event) *watcher.Watcher[events
 	bridge.watchersLock.Lock()
 	defer bridge.watchersLock.Unlock()
 
-	watcher := watcher.New(ofType...)
+	watcher := watcher.New(bridge.panicHandler, ofType...)
 
 	bridge.watchers = append(bridge.watchers, watcher)
 
@@ -483,26 +511,14 @@ func (bridge *Bridge) remWatcher(watcher *watcher.Watcher[events.Event]) {
 	watcher.Close()
 }
 
-func (bridge *Bridge) onStatusUp(ctx context.Context) {
+func (bridge *Bridge) onStatusUp(_ context.Context) {
 	logrus.Info("Handling API status up")
-
-	safe.RLock(func() {
-		for _, user := range bridge.users {
-			user.OnStatusUp(ctx)
-		}
-	}, bridge.usersLock)
 
 	bridge.goLoad()
 }
 
 func (bridge *Bridge) onStatusDown(ctx context.Context) {
 	logrus.Info("Handling API status down")
-
-	safe.RLock(func() {
-		for _, user := range bridge.users {
-			user.OnStatusDown(ctx)
-		}
-	}, bridge.usersLock)
 
 	for backoff := time.Second; ; backoff = min(backoff*2, 30*time.Second) {
 		select {
@@ -522,7 +538,7 @@ func (bridge *Bridge) onStatusDown(ctx context.Context) {
 }
 
 func loadTLSConfig(vault *vault.Vault) (*tls.Config, error) {
-	cert, err := tls.X509KeyPair(vault.GetBridgeTLSCert(), vault.GetBridgeTLSKey())
+	cert, err := tls.X509KeyPair(vault.GetBridgeTLSCert())
 	if err != nil {
 		return nil, err
 	}
@@ -531,24 +547,6 @@ func loadTLSConfig(vault *vault.Vault) (*tls.Config, error) {
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
 	}, nil
-}
-
-func newListener(port int, useTLS bool, tlsConfig *tls.Config) (net.Listener, error) {
-	if useTLS {
-		tlsListener, err := tls.Listen("tcp", fmt.Sprintf("%v:%v", constants.Host, port), tlsConfig)
-		if err != nil {
-			return nil, err
-		}
-
-		return tlsListener, nil
-	}
-
-	netListener, err := net.Listen("tcp", fmt.Sprintf("%v:%v", constants.Host, port))
-	if err != nil {
-		return nil, err
-	}
-
-	return netListener, nil
 }
 
 func min(a, b time.Duration) time.Duration {

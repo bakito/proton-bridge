@@ -41,9 +41,11 @@ public: // member functions.
     void setIsAutostartOn(bool on); ///< Forwards a SetIsAutostartOn call via a Qt signal.
     void setIsBetaEnabled(bool enabled); ///< Forwards a SetIsBetaEnabled call via a Qt signal.
     void setIsAllMailVisible(bool visible); ///< Forwards a SetIsAllMailVisible call via a Qt signal.
+    void setIsTelemetryDisabled(bool isDisabled); ///< Forwards a SetIsTelemetryDisabled call via a Qt signal.
     void setColorSchemeName(QString const &name); ///< Forward a SetColorSchemeName call via a Qt Signal
     void reportBug(QString const &osType, QString const &osVersion, QString const &emailClient, QString const &address,
         QString const &description, bool includeLogs); ///< Forwards a ReportBug call via a Qt signal.
+    void installTLSCertificate(); ///< Forwards a InstallTLScertificate call via a Qt signal.
     void exportTLSCertificates(QString const &folderPath); //< Forward an 'ExportTLSCertificates' call via a Qt signal.
     void setIsStreaming(bool isStreaming); ///< Forward a isStreaming internal messages via a Qt signal.
     void setClientPlatform(QString const &clientPlatform); ///< Forward a setClientPlatform call via a Qt signal.
@@ -52,6 +54,7 @@ public: // member functions.
     void setDiskCachePath(QString const &path); ///< Forwards a setDiskCachePath call via a Qt signal.
     void setIsAutomaticUpdateOn(bool on); ///< Forwards a SetIsAutomaticUpdateOn call via a Qt signal.
     void setUserSplitMode(QString const &userID, bool makeItActive); ///< Forwards a setUserSplitMode call via a Qt signal.
+    void sendBadEventUserFeedback(QString const &userID, bool doResync); ///< Forwards a sendBadEventUserFeedback call via a Qt signal.
     void logoutUser(QString const &userID); ///< Forwards a logoutUser call via a Qt signal.
     void removeUser(QString const &userID); ///< Forwards a removeUser call via a Qt signal.
     void configureUserAppleMail(QString const &userID, QString const &address); ///< Forwards a configureUserAppleMail call via a Qt signal.
@@ -61,9 +64,11 @@ signals:
     void setIsAutostartOnReceived(bool on); ///< Forwards a SetIsAutostartOn call via a Qt signal.
     void setIsBetaEnabledReceived(bool enabled); ///< Forwards a SetIsBetaEnabled call via a Qt signal.
     void setIsAllMailVisibleReceived(bool enabled); ///< Forwards a SetIsBetaEnabled call via a Qt signal.
+    void setIsTelemetryDisabledReceived(bool isDisabled); ///< Forwards a SetIsTelemetryDisabled call via a Qt signal.
     void setColorSchemeNameReceived(QString const &name); ///< Forward a SetColorScheme call via a Qt Signal
     void reportBugReceived(QString const &osType, QString const &osVersion, QString const &emailClient, QString const &address,
         QString const &description, bool includeLogs); ///< Signal for the ReportBug gRPC call
+    void installTLSCertificateReceived(); ///< Signal for the InstallTLSCertificate gRPC call.
     void exportTLSCertificatesReceived(QString const &folderPath); ///< Signal for the ExportTLSCertificates gRPC call.
     void setIsStreamingReceived(bool isStreaming); ///< Signal for the IsStreaming internal message.
     void setClientPlatformReceived(QString const &clientPlatform); ///< Signal for the SetClientPlatform gRPC call.
@@ -72,6 +77,7 @@ signals:
     void setDiskCachePathReceived(QString const &path); ///< Signal for the setDiskCachePath gRPC call.
     void setIsAutomaticUpdateOnReceived(bool on); ///< Signal for the SetIsAutomaticUpdateOn gRPC call.
     void setUserSplitModeReceived(QString const &userID, bool makeItActive); ///< Signal for the SetUserSplitModeReceived gRPC call.
+    void sendBadEventUserFeedbackReceived(QString const &userID, bool doResync); ///< Signal for the SendBadEventUserFeedback gRPC call.
     void logoutUserReceived(QString const &userID); ///< Signal for the LogoutUserReceived gRPC call.
     void removeUserReceived(QString const &userID); ///< Signal for the RemoveUserReceived gRPC call.
     void configureUserAppleMailReceived(QString const &userID, QString const &address); ///< Signal for the ConfigureAppleMail gRPC call.

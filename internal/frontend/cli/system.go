@@ -27,11 +27,12 @@ import (
 	"strings"
 
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
+	"github.com/ProtonMail/proton-bridge/v3/internal/certs"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/ports"
 	"github.com/abiosoft/ishell"
 )
 
-func (f *frontendCLI) printLogDir(c *ishell.Context) {
+func (f *frontendCLI) printLogDir(_ *ishell.Context) {
 	if path, err := f.bridge.GetLogsPath(); err != nil {
 		f.Println("Failed to determine location of log files")
 	} else {
@@ -39,17 +40,17 @@ func (f *frontendCLI) printLogDir(c *ishell.Context) {
 	}
 }
 
-func (f *frontendCLI) printManual(c *ishell.Context) {
-	f.Println("More instructions about the Bridge can be found at\n\n  https://protonmail.com/bridge")
+func (f *frontendCLI) printManual(_ *ishell.Context) {
+	f.Println("More instructions about the Bridge can be found at\n\n  https://proton.me/mail/bridge")
 }
 
-func (f *frontendCLI) printCredits(c *ishell.Context) {
+func (f *frontendCLI) printCredits(_ *ishell.Context) {
 	for _, pkg := range strings.Split(bridge.Credits, ";") {
 		f.Println(pkg)
 	}
 }
 
-func (f *frontendCLI) changeIMAPSecurity(c *ishell.Context) {
+func (f *frontendCLI) changeIMAPSecurity(_ *ishell.Context) {
 	f.ShowPrompt(false)
 	defer f.ShowPrompt(true)
 
@@ -61,14 +62,14 @@ func (f *frontendCLI) changeIMAPSecurity(c *ishell.Context) {
 	msg := fmt.Sprintf("Are you sure you want to change IMAP setting to %q", newSecurity)
 
 	if f.yesNoQuestion(msg) {
-		if err := f.bridge.SetIMAPSSL(!f.bridge.GetIMAPSSL()); err != nil {
+		if err := f.bridge.SetIMAPSSL(context.Background(), !f.bridge.GetIMAPSSL()); err != nil {
 			f.printAndLogError(err)
 			return
 		}
 	}
 }
 
-func (f *frontendCLI) changeSMTPSecurity(c *ishell.Context) {
+func (f *frontendCLI) changeSMTPSecurity(_ *ishell.Context) {
 	f.ShowPrompt(false)
 	defer f.ShowPrompt(true)
 
@@ -80,7 +81,7 @@ func (f *frontendCLI) changeSMTPSecurity(c *ishell.Context) {
 	msg := fmt.Sprintf("Are you sure you want to change SMTP setting to %q", newSecurity)
 
 	if f.yesNoQuestion(msg) {
-		if err := f.bridge.SetSMTPSSL(!f.bridge.GetSMTPSSL()); err != nil {
+		if err := f.bridge.SetSMTPSSL(context.Background(), !f.bridge.GetSMTPSSL()); err != nil {
 			f.printAndLogError(err)
 			return
 		}
@@ -103,7 +104,7 @@ func (f *frontendCLI) changeIMAPPort(c *ishell.Context) {
 		return
 	}
 
-	if err := f.bridge.SetIMAPPort(newIMAPPortInt); err != nil {
+	if err := f.bridge.SetIMAPPort(context.Background(), newIMAPPortInt); err != nil {
 		f.printAndLogError(err)
 		return
 	}
@@ -125,13 +126,13 @@ func (f *frontendCLI) changeSMTPPort(c *ishell.Context) {
 		return
 	}
 
-	if err := f.bridge.SetSMTPPort(newSMTPPortInt); err != nil {
+	if err := f.bridge.SetSMTPPort(context.Background(), newSMTPPortInt); err != nil {
 		f.printAndLogError(err)
 		return
 	}
 }
 
-func (f *frontendCLI) allowProxy(c *ishell.Context) {
+func (f *frontendCLI) allowProxy(_ *ishell.Context) {
 	if f.bridge.GetProxyAllowed() {
 		f.Println("Bridge is already set to use alternative routing to connect to Proton if it is being blocked.")
 		return
@@ -147,7 +148,7 @@ func (f *frontendCLI) allowProxy(c *ishell.Context) {
 	}
 }
 
-func (f *frontendCLI) disallowProxy(c *ishell.Context) {
+func (f *frontendCLI) disallowProxy(_ *ishell.Context) {
 	if !f.bridge.GetProxyAllowed() {
 		f.Println("Bridge is already set to NOT use alternative routing to connect to Proton if it is being blocked.")
 		return
@@ -163,7 +164,7 @@ func (f *frontendCLI) disallowProxy(c *ishell.Context) {
 	}
 }
 
-func (f *frontendCLI) hideAllMail(c *ishell.Context) {
+func (f *frontendCLI) hideAllMail(_ *ishell.Context) {
 	if !f.bridge.GetShowAllMail() {
 		f.Println("All Mail folder is not listed in your local client.")
 		return
@@ -179,7 +180,7 @@ func (f *frontendCLI) hideAllMail(c *ishell.Context) {
 	}
 }
 
-func (f *frontendCLI) showAllMail(c *ishell.Context) {
+func (f *frontendCLI) showAllMail(_ *ishell.Context) {
 	if f.bridge.GetShowAllMail() {
 		f.Println("All Mail folder is listed in your local client.")
 		return
@@ -195,8 +196,40 @@ func (f *frontendCLI) showAllMail(c *ishell.Context) {
 	}
 }
 
+func (f *frontendCLI) enableTelemetry(_ *ishell.Context) {
+	if !f.bridge.GetTelemetryDisabled() {
+		f.Println("Usage diagnostics collection is enabled.")
+		return
+	}
+
+	f.Println("Usage diagnostics collection is disabled right now.")
+
+	if f.yesNoQuestion("Do you want to enable usage diagnostics collection") {
+		if err := f.bridge.SetTelemetryDisabled(false); err != nil {
+			f.printAndLogError(err)
+			return
+		}
+	}
+}
+
+func (f *frontendCLI) disableTelemetry(_ *ishell.Context) {
+	if f.bridge.GetTelemetryDisabled() {
+		f.Println("Usage diagnostics collection is disabled.")
+		return
+	}
+
+	f.Println("Usage diagnostics collection is enabled right now.")
+
+	if f.yesNoQuestion("Do you want to disable usage diagnostics collection") {
+		if err := f.bridge.SetTelemetryDisabled(true); err != nil {
+			f.printAndLogError(err)
+			return
+		}
+	}
+}
+
 func (f *frontendCLI) setGluonLocation(c *ishell.Context) {
-	if gluonDir := f.bridge.GetGluonDir(); gluonDir != "" {
+	if gluonDir := f.bridge.GetGluonCacheDir(); gluonDir != "" {
 		f.Println("The current message cache location is:", gluonDir)
 	}
 
@@ -206,6 +239,50 @@ func (f *frontendCLI) setGluonLocation(c *ishell.Context) {
 			return
 		}
 	}
+}
+
+func (f *frontendCLI) tlsCertStatus(_ *ishell.Context) {
+	cert, _ := f.bridge.GetBridgeTLSCert()
+	installer := certs.NewInstaller()
+	if installer.IsCertInstalled(cert) {
+		f.Println("The Bridge TLS certificate is already installed in the OS keychain.")
+	} else {
+		f.Println("The Bridge TLS certificate is not installed in the OS keychain.")
+	}
+}
+
+func (f *frontendCLI) installTLSCert(_ *ishell.Context) {
+	cert, _ := f.bridge.GetBridgeTLSCert()
+	installer := certs.NewInstaller()
+	if installer.IsCertInstalled(cert) {
+		f.printAndLogError(errors.New("the Bridge TLS certificate is already installed in the OS keychain"))
+		return
+	}
+
+	f.Println("Please provide your credentials in the system popup dialog in order to continue.")
+	if err := installer.InstallCert(cert); err != nil {
+		f.printAndLogError(err)
+		return
+	}
+
+	f.Println("The Bridge TLS certificate was successfully installed in the OS keychain.")
+}
+
+func (f *frontendCLI) uninstallTLSCert(_ *ishell.Context) {
+	cert, _ := f.bridge.GetBridgeTLSCert()
+	installer := certs.NewInstaller()
+	if !installer.IsCertInstalled(cert) {
+		f.printAndLogError(errors.New("the Bridge TLS certificate is not installed in the OS keychain"))
+		return
+	}
+
+	f.Println("Please provide your credentials in the system popup dialog in order to continue.")
+	if err := installer.UninstallCert(cert); err != nil {
+		f.printAndLogError(err)
+		return
+	}
+
+	f.Println("The Bridge TLS certificate was successfully uninstalled from the OS keychain.")
 }
 
 func (f *frontendCLI) exportTLSCerts(c *ishell.Context) {
@@ -224,6 +301,27 @@ func (f *frontendCLI) exportTLSCerts(c *ishell.Context) {
 
 		f.Println("TLS certificate exported to", location)
 	}
+}
+
+func (f *frontendCLI) importTLSCerts(c *ishell.Context) {
+	certPath := f.readStringInAttempts("Enter the path to the cert.pem file", c.ReadLine, f.isFile)
+	if certPath == "" {
+		f.printAndLogError(errors.New("failed to get cert path"))
+		return
+	}
+
+	keyPath := f.readStringInAttempts("Enter the path to the key.pem file", c.ReadLine, f.isFile)
+	if keyPath == "" {
+		f.printAndLogError(errors.New("failed to get key path"))
+		return
+	}
+
+	if err := f.bridge.SetBridgeTLSCertPath(certPath, keyPath); err != nil {
+		f.printAndLogError(err)
+		return
+	}
+
+	f.Println("TLS certificate imported. Restart Bridge to use it.")
 }
 
 func (f *frontendCLI) isPortFree(port string) bool {
@@ -251,4 +349,13 @@ func (f *frontendCLI) isCacheLocationUsable(location string) bool {
 	}
 
 	return stat.IsDir()
+}
+
+func (f *frontendCLI) isFile(location string) bool {
+	stat, err := os.Stat(location)
+	if err != nil {
+		return false
+	}
+
+	return !stat.IsDir()
 }

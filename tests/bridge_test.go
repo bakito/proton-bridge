@@ -19,14 +19,20 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
+	"github.com/cucumber/godog"
 	"github.com/golang/mock/gomock"
 )
 
@@ -58,24 +64,28 @@ func (s *scenario) theAPIRequiresBridgeVersion(version string) error {
 }
 
 func (s *scenario) theUserChangesTheIMAPPortTo(port int) error {
-	return s.t.bridge.SetIMAPPort(port)
+	return s.t.bridge.SetIMAPPort(context.Background(), port)
 }
 
 func (s *scenario) theUserChangesTheSMTPPortTo(port int) error {
-	return s.t.bridge.SetSMTPPort(port)
+	return s.t.bridge.SetSMTPPort(context.Background(), port)
 }
 
 func (s *scenario) theUserSetsTheAddressModeOfUserTo(user, mode string) error {
 	switch mode {
 	case "split":
-		return s.t.bridge.SetAddressMode(context.Background(), s.t.getUserID(user), vault.SplitMode)
+		return s.t.bridge.SetAddressMode(context.Background(), s.t.getUserByName(user).getUserID(), vault.SplitMode)
 
 	case "combined":
-		return s.t.bridge.SetAddressMode(context.Background(), s.t.getUserID(user), vault.CombinedMode)
+		return s.t.bridge.SetAddressMode(context.Background(), s.t.getUserByName(user).getUserID(), vault.CombinedMode)
 
 	default:
 		return fmt.Errorf("unknown address mode %q", mode)
 	}
+}
+
+func (s *scenario) theUserChangesTheDefaultKeychainApplication() error {
+	return s.t.bridge.SetKeychainApp("CustomKeychainApp")
 }
 
 func (s *scenario) theUserChangesTheGluonPath() error {
@@ -88,12 +98,22 @@ func (s *scenario) theUserChangesTheGluonPath() error {
 }
 
 func (s *scenario) theUserDeletesTheGluonFiles() error {
-	path, err := s.t.locator.ProvideGluonPath()
-	if err != nil {
-		return err
+	if path, err := s.t.locator.ProvideGluonDataPath(); err != nil {
+		return fmt.Errorf("failed to get gluon Data path: %w", err)
+	} else if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("failed to remove gluon Data path: %w", err)
 	}
 
-	return os.RemoveAll(path)
+	return s.theUserDeletesTheGluonCache()
+}
+
+func (s *scenario) theUserDeletesTheGluonCache() error {
+	if path, err := s.t.locator.ProvideGluonDataPath(); err != nil {
+		return fmt.Errorf("failed to get gluon Cache path: %w", err)
+	} else if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("failed to remove gluon Cache path: %w", err)
+	}
+	return nil
 }
 
 func (s *scenario) theUserHasDisabledAutomaticUpdates() error {
@@ -106,7 +126,6 @@ func (s *scenario) theUserHasDisabledAutomaticUpdates() error {
 
 		started = true
 	}
-
 	if err := s.t.bridge.SetAutoUpdate(false); err != nil {
 		return err
 	}
@@ -116,12 +135,105 @@ func (s *scenario) theUserHasDisabledAutomaticUpdates() error {
 			return err
 		}
 	}
-
 	return nil
 }
 
+func (s *scenario) theUserHasDisabledAutomaticStart() error {
+	return s.t.bridge.SetAutostart(false)
+}
+
+func (s *scenario) theUserHasEnabledAlternativeRouting() error {
+	s.t.expectProxyCtlAllowProxy()
+	return s.t.bridge.SetProxyAllowed(true)
+}
+
+func (s *scenario) theUserSetIMAPModeToSSL() error {
+	return s.t.bridge.SetIMAPSSL(context.Background(), true)
+}
+
+func (s *scenario) theUserSetSMTPModeToSSL() error {
+	return s.t.bridge.SetSMTPSSL(context.Background(), true)
+}
+
+type testBugReport struct {
+	request bridge.ReportBugReq
+	bridge  *bridge.Bridge
+}
+
+func newTestBugReport(br *bridge.Bridge) *testBugReport {
+	request := bridge.ReportBugReq{
+		OSType:      "osType",
+		OSVersion:   "osVersion",
+		Title:       "title",
+		Description: "description",
+		Username:    "username",
+		Email:       "email",
+		EmailClient: "client",
+		IncludeLogs: false,
+	}
+	return &testBugReport{
+		request: request,
+		bridge:  br,
+	}
+}
+
+func (r *testBugReport) report() error {
+	if r.request.IncludeLogs == true {
+		data := []byte("Test log file.\n")
+		logName := "20231031_122940334_bri_000_v3.6.1+qa_br-178.log"
+		logPath, err := r.bridge.GetLogsPath()
+		if err != nil {
+			return err
+		}
+
+		if err := os.WriteFile(filepath.Join(logPath, logName), data, 0o600); err != nil {
+			return err
+		}
+	}
+	return r.bridge.ReportBug(context.Background(), &r.request)
+}
+
 func (s *scenario) theUserReportsABug() error {
-	return s.t.bridge.ReportBug(context.Background(), "osType", "osVersion", "description", "username", "email", "client", false)
+	return newTestBugReport(s.t.bridge).report()
+}
+
+func (s *scenario) theUserReportsABugWithSingleHeaderChange(key, value string) error {
+	bugReport := newTestBugReport(s.t.bridge)
+
+	switch key {
+	case "osType":
+		bugReport.request.OSType = value
+	case "osVersion":
+		bugReport.request.OSVersion = value
+	case "Title":
+		bugReport.request.Title = value
+	case "Description":
+		bugReport.request.Description = value
+	case "Username":
+		bugReport.request.Username = value
+	case "Email":
+		bugReport.request.Email = value
+	case "Client":
+		bugReport.request.EmailClient = value
+	case "IncludeLogs":
+		att, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("failed to parse bug report attachment preferences: %w", err)
+		}
+		bugReport.request.IncludeLogs = att
+	default:
+		return fmt.Errorf("Wrong header (\"%s\") is being checked", key)
+	}
+
+	return bugReport.report()
+}
+
+func (s *scenario) theUserReportsABugWithDetails(value *godog.DocString) error {
+	bugReport := newTestBugReport(s.t.bridge)
+	if err := json.Unmarshal([]byte(value.Content), &bugReport.request); err != nil {
+		return fmt.Errorf("cannot parse bug report details: %w", err)
+	}
+	return bugReport.report()
 }
 
 func (s *scenario) bridgeSendsAConnectionUpEvent() error {
@@ -146,7 +258,7 @@ func (s *scenario) bridgeSendsADeauthEventForUser(username string) error {
 		return errors.New("expected deauth event, got none")
 	}
 
-	if wantUserID := s.t.getUserID(username); event.UserID != wantUserID {
+	if wantUserID := s.t.getUserByName(username).getUserID(); event.UserID != wantUserID {
 		return fmt.Errorf("expected deauth event for user %s, got %s", wantUserID, event.UserID)
 	}
 
@@ -159,7 +271,7 @@ func (s *scenario) bridgeSendsAnAddressCreatedEventForUser(username string) erro
 		return errors.New("expected address created event, got none")
 	}
 
-	if wantUserID := s.t.getUserID(username); event.UserID != wantUserID {
+	if wantUserID := s.t.getUserByName(username).getUserID(); event.UserID != wantUserID {
 		return fmt.Errorf("expected address created event for user %s, got %s", wantUserID, event.UserID)
 	}
 
@@ -172,7 +284,7 @@ func (s *scenario) bridgeSendsAnAddressDeletedEventForUser(username string) erro
 		return errors.New("expected address deleted event, got none")
 	}
 
-	if wantUserID := s.t.getUserID(username); event.UserID != wantUserID {
+	if wantUserID := s.t.getUserByName(username).getUserID(); event.UserID != wantUserID {
 		return fmt.Errorf("expected address deleted event for user %s, got %s", wantUserID, event.UserID)
 	}
 
@@ -180,25 +292,30 @@ func (s *scenario) bridgeSendsAnAddressDeletedEventForUser(username string) erro
 }
 
 func (s *scenario) bridgeSendsSyncStartedAndFinishedEventsForUser(username string) error {
-	startEvent, ok := awaitType(s.t.events, events.SyncStarted{}, 30*time.Second)
-	if !ok {
-		return errors.New("expected sync started event, got none")
-	}
+	wantUserID := s.t.getUserByName(username).getUserID()
+	for {
+		startEvent, ok := awaitType(s.t.events, events.SyncStarted{}, 30*time.Second)
+		if !ok {
+			return errors.New("expected sync started event, got none")
+		}
 
-	if wantUserID := s.t.getUserID(username); startEvent.UserID != wantUserID {
-		return fmt.Errorf("expected sync started event for user %s, got %s", wantUserID, startEvent.UserID)
-	}
+		// There can be multiple sync events, and some might not be for this user
+		if startEvent.UserID != wantUserID {
+			continue
+		}
 
-	finishEvent, ok := awaitType(s.t.events, events.SyncFinished{}, 30*time.Second)
-	if !ok {
-		return errors.New("expected sync finished event, got none")
+		break
 	}
+	for {
+		finishEvent, ok := awaitType(s.t.events, events.SyncFinished{}, 30*time.Second)
+		if !ok {
+			return errors.New("expected sync finished event, got none")
+		}
 
-	if wantUserID := s.t.getUserID(username); finishEvent.UserID != wantUserID {
-		return fmt.Errorf("expected sync finished event for user %s, got %s", wantUserID, finishEvent.UserID)
+		if wantUserID := s.t.getUserByName(username).getUserID(); finishEvent.UserID == wantUserID {
+			return nil
+		}
 	}
-
-	return nil
 }
 
 func (s *scenario) bridgeSendsAnUpdateNotAvailableEvent() error {
@@ -274,10 +391,70 @@ func (s *scenario) bridgeReportsMessage(message string) error {
 	return nil
 }
 
+func (s *scenario) bridgeTelemetryFeatureEnabled() error {
+	return s.checkTelemetry(true)
+}
+
+func (s *scenario) bridgeTelemetryFeatureDisabled() error {
+	return s.checkTelemetry(false)
+}
+
+func (s *scenario) checkTelemetry(expect bool) error {
+	return eventually(func() error {
+		res := s.t.bridge.IsTelemetryAvailable(context.Background())
+		if res != expect {
+			return fmt.Errorf("expected telemetry feature %v but got %v ", expect, res)
+		}
+		return nil
+	})
+}
+
 func (s *scenario) theUserHidesAllMail() error {
 	return s.t.bridge.SetShowAllMail(false)
 }
 
 func (s *scenario) theUserShowsAllMail() error {
 	return s.t.bridge.SetShowAllMail(true)
+}
+
+func (s *scenario) theUserDisablesTelemetryInBridgeSettings() error {
+	return s.t.bridge.SetTelemetryDisabled(true)
+}
+
+func (s *scenario) theUserEnablesTelemetryInBridgeSettings() error {
+	return s.t.bridge.SetTelemetryDisabled(false)
+}
+
+func (s *scenario) networkPortIsBusy(port int) {
+	if listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port)); err == nil { // we ignore errors. Most likely port is already busy.
+		s.t.dummyListeners = append(s.t.dummyListeners, listener)
+	}
+}
+
+func (s *scenario) networkPortRangeIsBusy(startPort, endPort int) {
+	if startPort > endPort {
+		startPort, endPort = endPort, startPort
+	}
+
+	for port := startPort; port <= endPort; port++ {
+		s.networkPortIsBusy(port)
+	}
+}
+
+func (s *scenario) bridgeIMAPPortIs(expectedPort int) error {
+	actualPort := s.t.bridge.GetIMAPPort()
+	if actualPort != expectedPort {
+		return fmt.Errorf("expected IMAP port to be %v but got %v", expectedPort, actualPort)
+	}
+
+	return nil
+}
+
+func (s *scenario) bridgeSMTPPortIs(expectedPort int) error {
+	actualPort := s.t.bridge.GetSMTPPort()
+	if actualPort != expectedPort {
+		return fmt.Errorf("expected SMTP port to be %v but got %v", expectedPort, actualPort)
+	}
+
+	return nil
 }

@@ -24,6 +24,10 @@ import (
 	"sync"
 )
 
+const DefaultUserAgent = "NoClient/0.0.1"
+const DefaultVersion = "0.0.1"
+const UnknownClient = "UnknownClient"
+
 type UserAgent struct {
 	client, platform string
 
@@ -42,6 +46,20 @@ func (ua *UserAgent) SetClient(name, version string) {
 	defer ua.lock.Unlock()
 
 	ua.client = fmt.Sprintf("%v/%v", name, regexp.MustCompile(`(.*) \((.*)\)`).ReplaceAllString(version, "$1-$2"))
+}
+
+func (ua *UserAgent) SetClientString(client string) {
+	ua.lock.Lock()
+	defer ua.lock.Unlock()
+
+	ua.client = client
+}
+
+func (ua *UserAgent) GetClientString() string {
+	ua.lock.RLock()
+	defer ua.lock.RUnlock()
+
+	return ua.client
 }
 
 func (ua *UserAgent) HasClient() bool {
@@ -67,7 +85,7 @@ func (ua *UserAgent) GetUserAgent() string {
 	if ua.client != "" {
 		client = ua.client
 	} else {
-		client = "NoClient/0.0.1"
+		client = DefaultUserAgent
 	}
 
 	return fmt.Sprintf("%v (%v)", client, ua.platform)

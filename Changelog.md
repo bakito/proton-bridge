@@ -1,6 +1,722 @@
-# Proton Mail Bridge and Import-Export app Changelog
+# Proton Mail Bridge Changelog
 
 Changelog [format](http://keepachangelog.com/en/1.0.0/)
+
+
+## Xikou Bridge 3.8.0
+
+### Added
+* Test: Add test scenarios to add an /Answered flag to a replied message and revert.
+* GODT-3046: Added links to KB in error messages.
+* Test(GODT-3113): Inline HTML message and HTML attachment is getting altered.
+* Test(GODT-3124): Attempt to fix 401 during login.
+
+### Changed
+* GODT-3134: Br tag triggers installer.
+* Added update events to bridge GUI tester.
+
+### Fixed
+* GODT-3142: Pass br tag if available.
+* GODT-3151: Fix feature test with non modified HTML part.
+* GODT-3151: Only modify HTML Meta content if UTF-8 charset override is needed.
+* GODT-2851: Add empty text part if no text part when importing multipart.
+* GODT-3102: Distinguish Vault Decryption from Serialization Errors.
+* GODT-3124: Handling of sync child jobs.
+* GODT-3148: Bump go-sysinfo to get rid of linker warning on macOS Sonoma.
+* GODT-3124: Flaky tests.
+* GODT-3022: Handle multipart/related on fake server.
+* GODT-3133: Fix GetSystemLanguage.
+* GODT-3124: Race condition in sync task waiter.
+* GODT-3124: Race conditions reported by race check.
+* GODT-2797: Encode attached key name and use same pubkey name as web-app.
+* Fix case of IMAP login error.
+* GODT-3132: Do not allow sending on disabled accounts.
+* GODT-3046: fix typo spotted during KB article review.
+* GODT-3129: Bad Event during after address order change.
+* GODT-3117: Improve GetAllContacts and GetAllContactsEmail.
+
+
+## Wakato Bridge 3.7.1
+
+### Added
+* Test(GODT-2740): Sending Plain text messages to internal recipient.
+* Test(GODT-2892): Create fake log file.
+* GODT-3122: Added test, changed interface for accessing display name.
+
+### Changed
+* Remove debug prints.
+* GODT-2576: Forward and $Forward Flag Support.
+* GODT-3053: Use smaller bridge window on small screens.
+* GODT-3113: Only force UTF-8 charset for HTML part when needed.
+* GODT-3113: Do not render HTML for attachment.
+* GODT-3112: Replaced error message when bridge exists prematurely. Added a link to support form.
+* GODT-2947: Remove 'blame it on the weather' error part from go-smtp.
+* GODT-3010: Log MimeType parsing issue.
+* GODT-3104: Added log entry for cert install status on startup on macOS.
+* GODT-2277: Move Keychain helpers creation in main.
+
+### Fixed
+* GODT-3054: Only delete drafts after message has been Sent.
+* GODT-2576: Correctly handle Forwarded messages from Thunderbird.
+* GODT-3122: Use display name as 'Email Account Name' in macOS profile.
+* GODT-3125: Heartbeat crash on exit.
+* GODT-2617: Validate user can send from the SMTP sender address.
+* GODT-3123: Trigger bad event on empty EventID on existing accounts.
+* GODT-3118: Do not reset EventID when migrating sync settings.
+* GODT-3116: Panic on closed channel.
+* GODT-1623: Throttle SMTP failed requests.
+* GODT-3047: Fixed 'disk full' error message.
+* GODT-3054: Delete draft create from reply.
+* GODT-3048: WKD Policy behavior.
+
+
+## Wakato Bridge 3.7.0
+
+### Added
+* Test(GODT-1224): Add testing around package creation.
+* Add debug_assemble binary.
+* Test(GODT-2723): Add importing a message with remote content.
+* Test(GODT-2737): Sending HTML messages to internal.
+* Test(GODT-3036): Keep inline attachment order on GPA Fake Server.
+* GODT-3015: Add simple algorithm to deal with multiple attachment for bug report.
+* Test: make message structure check more verbose.
+* Test: Add test around account settings.
+
+### Changed
+* GODT-3097: Warn about PGPInline encryption scheme which will be deprecated.
+* Test: Support multiple users when waiting for sync event.
+* Test: Update fake server with defautl draft content-type and test it.
+* Test: be less aggressive while checking for message structure.
+* GODT-2996: Set password fields to hidden when resetting the login form.
+* GODT-2990: Change runner tags.
+* GODT-2835: Bump GPA adding support for AsyncAttachments for BugReport +...
+* GODT-2940: Allow 3 attempts for mailbox password.
+* GODT-3095: Update GOpenPGP.
+
+### Fixed
+* GODT-3106: Broken import route.
+* GODT-3041: Fix Invalid Or Missing message signature during send.
+* GODT-3087: Exclude attachment content-disposition part when determining...
+* GODT-2887: Inline images with Apple Mail.
+* GODT-3100: Fix issue where a fatal error that bubble up to cli.Run() is not written in the log file.
+* GODT-3094: Clean up old update files on bridge startup.
+* GODT-3012: Fix multipart request retries.
+* GODT-2935: Do not allow parentID into drafts.
+* GODT-2935: Correct error message when draft fails to create.
+* GODT-2970: Correctly handle rename of Inbox.
+* GODT-2969: Prevent duration corruption for config status event.
+* Fixed type in QA installer CI job name.
+* GODT-3019: Fix title of main window when no account is connected.
+* GODT-3013: IMAP service getting "stuck".
+* GODT-2966: Allow permissive parsing of MediaType parameters for import.
+* GODT-2966: Add more test regarding quoted/unquoted filename in attachment.
+* GODT-2490: Fix sync progress not being reset when toggling split mode.
+* GODT-2515: Customized notification of unavailable keychain on macOS.
+
+
+## Vasco da Gama Bridge 3.6.1
+
+### Fixed
+* GODT-3033: Unable to receive new mail.
+
+
+## Umshiang Bridge 3.5.4
+
+### Fixed
+* GODT-3033: Unable to receive new mail.
+
+
+
+## Vasco da Gama Bridge 3.6.0
+
+### Added
+* GODT-2762: Setup wizard.
+* GODT-2772: Setup wizard content.
+* GODT-2769: Setup Wizard architecture.
+* GODT-2767: Setup Wizard foundations.
+* GODT-2725: Implement receive message step with expected structure exposed.
+
+### Changed
+* GODT-2960: Added content in empty view when there is no account.
+* GODT-2771: Cert related tools for macOS.
+* GODT-2770: Proof of concept for web view as a tool window and overlay (not used).
+* GODT-2916: Split Decryption from Message Building.
+* GODT-2597: Implement contact specific settings in integration tests.
+* GODT-2664: Trigger QA installer.
+
+### Fixed
+* GODT-2992: Fix link in 'no account view' in main window after 2FA or TOTP are cancelled.
+* GODT-2989: Allow to send bug report when no account connected.
+* GODT-2988: Fix setup wizard KB links.
+* GODT-2968: Use proper base64 encoded string even for bad password test.
+* GODT-2965: Fix multipart/mixed testdata + structure parsing steps related to this.
+* GODT-2932: Fix syncing not being reported in GUI.
+* GODT-2967: Tray menu entries close the setup wizard when needed.
+* GODT-2212: Preserver Header order in message building.
+* Fixed missing GoOs gRPC call in bridge-gui-tester.
+* GODT-2929: Message dedup with different text transfer encoding.
+
+
+## Umshiang Bridge 3.5.3
+
+### Changed
+* GODT-3004: Update gopenpgp and dependencies.
+
+
+## Umshiang Bridge 3.5.2
+
+### Fixed
+* GODT-3003: Ensure IMAP State is reset after vault corruption.
+* GODT-3001: Only create system labels during system label sync.
+
+
+## Umshiang Bridge 3.5.1
+
+### Fixed
+* GODT-2963: Use multi error to report file removal errors.
+* GODT-2956: Restore old deletion rules.
+* GODT-2951: Negative WaitGroup Counter.
+* GODT-2590: Fix send on closed channel.
+* GODT-2949: Fix close of close channel in event service.
+
+
+## Umshiang Bridge 3.5.0
+
+### Added
+* GODT-2734: Add testing steps to modify account settings.
+* GODT-2746: Integration tests for reporting a problem.
+* GODT-2891: Allow message create & delete during sync.
+* GODT-2848: Decouple IMAP service from Event Loop.
+* Add trace profiling option.
+* GODT-2829: New Sync Service.
+* Test: oss-fuzz support for fuzzing.
+* GODT-2799: SMTP Service.
+* GODT-2800: User Event Service.
+* GODT-2801: Identity Service.
+* GODT-2802: IMAP Serivce.
+* GODT-2788: Add preview to bug report validation and JSON file validator.
+* GODT-2803: Bridge Database access.
+
+### Changed
+* GODT-2909: Remove Timeout on event publish.
+* GODT-2913: Reduce the number of configuration failure detected.
+* GODT-2828: Increase sync progress report frequency.
+* Test: Fix TestBridge_SyncWithOnGoingEvents.
+* GODT-2871: Is telemetry enabled as service.
+* Test(GODT-2873): Wait for Gluon Watcher to finish.
+* Test(GODT-2744): Add integration tests for moving messages (with MOVE support).
+* Test(GODT-2872): Fix nightly job.
+* Test(GODT-2742): Add more integration tests regarding drafts.
+* GODT-2787: Force Scrollview to top when re-opening questions set.
+* GODT-2787: Tweaking Bug Report form with last Review.
+* Ci(GODT-2717): Create a job that will run on schedule.
+* GODT-2787: Fix vertical alignement on CategoryItem.
+* GODT-2842: Implement Bug Report Fallback notification.
+* Chore(GODT-2848): Simplify User Event Service.
+* GODT-2808: Apply comment from Bug Report content review.
+* Test(GODT-2743): Sync high number of messages.
+* GODT-2814: Standalone Server Manager.
+* GODT-2808: Initial list of categories and questions.
+* GODT-2787: Replace the PathTracker by a more visual NavigationIndicator.
+* GODT-2816: Wait until mandatory fields are filled then fill body and title.
+* GODT-2794: Clear cached answers when report is sent.
+* GODT-2793: Feed the bug report body with the answered questions.
+* GODT-2791: Parse the Bug Report Flow description file and ensure forward compatibility (GODT-2789).
+* GODT-2821: Display questions in one page.
+* GODT-2786: Init bug report flow description file.
+* GODT-2792: Implement display of question set for bug report.
+* Use qmlformat on qml files, and removed deprecated tests.
+
+### Fixed
+* GODT-2828: Fix negative report time.
+* GODT-2828: Fix sync progress report after restart.
+* GODT-2867: Do not crash on timeout or context cancel.
+* GODT-2693: Duplicate messages in sent folder.
+* GODT-2867: Get attachment returns API error on network problem.
+* GODT-2805: Ignore Contact Group Labels.
+* GODT-2866: Add 429/5xx Retry to Event Service.
+* GODT-2855: Fix for text overlapping in settings view.
+* Test: Verify leaks at end of WithEnv.
+* Test: Fix event registration in TestBridge_SyncWithOngoingEvents.
+* Test: Fix deadlock in chToType.
+* GODT-2865: Add error on failed unlock.
+* GODT-2857: Do not check changed values in clear recent flag.
+* GODT-2827: Restore ticker to event poller.
+* Test: TestBridge_SendAddTextBodyPartIfNotExists eventually fix.
+* GODT-2813: Write new vault to temporary file first.
+* GODT-2807: Fix issue where sessionID would not be removed from command-line on restart by bridge-gui.
+* GODT-2687: Tabs after header field colon.
+* GODT-2764: Allow perma-delete for messages which still have labels.
+* GODT-2693: Fix message appearing twice after sent.
+* GODT-2781: Try to remove stale lock file before failing in checkSingleInstance.
+* GODT-2780: Fix 'QSystemTrayIcon::setVisible: No Icon set' warning in bridge-gui log on startup.
+* GODT-2778: Fix login screen being disabled after an 'already logged in' error.
+* Fix typos found by codespell.
+* GODT-2577: Answered flag should only be applied to replied messages.
+
+
+## Trift Bridge 3.4.1
+
+### Fixed
+* GODT-2859: Trigger user resync while updating from 3.4.0 to 3.4.1.
+* GODT-2833: Fix migration of message flags.
+* GODT-2759: Use examine rather than select for fetching.
+
+
+## Trift Bridge 3.4.0
+
+### Added
+
+### Changed
+* Test: Add require.Eventually to TestBridge_UserAgentFromSMTPClient.
+* Test: Add smtp-send utility.
+* GODT-2759: Check for oprhan messages.
+* GODT-2759: Add prompt to download missing messages for analysis.
+* GODT-2759: CLI debug commands.
+* Remove gRPC auto-generated C++ source files.
+* Test: Force all unit test to use minimum sync spec.
+* Test: Force sync limits to minimum with env variable.
+* GODT-2691: Close logrus output file on exit.
+* GODT-2522: New Gluon database layout.
+* GODT-2678: When internet is off, do not display status dot icon for the user in the context menu.
+* GODT-2686: Change the orientation of the expand/collapse arrow for Advanced settings.
+* Test(GODT-2636): Add step for sending from EML.
+* Log failed message ids during sync.
+* GODT-2510: Remove Ent.
+* Test(GODT-2600): Changing state (read/unread, starred/unstarred) of a message in integration tests.
+* GODT-2703: Got rid of account details dialog with Apple Mail autoconf.
+* GODT-2685: Update to bug report log attachment logic.
+* GODT-2690: Update sentry reporting in GUI for new log file naming.
+* GODT-2668: Implemented new log retention policy.
+* Test(GODT-2683): Save Draft without "Date" & "From" in headers.
+* GODT-2666: Feat(GODT-2667): introduce sessionID in bridge.
+* GODT-2660: Calculate bridge coverage and refactor CI yaml file.
+* Fix dependency_license script to handle dot formated version.
+
+### Fixed
+* GODT-2812: Fix rare sync deadlock.
+* GODT-2822: Better handling 429 during sync and event loop.
+* GODT-2763: Missing Answered flag on Sync and Message Create.
+* GODT-2758: Fix panic in SetFlagsOnMessages.
+* GODT-2578: Refresh literals appended to Sent folder.
+* GODT-2753: Vault test now check that value auto-assigned is first available port.
+* GODT-2522: Handle migration with unreferenced db values.
+* GODT-2670: Allow missing whitespace after header field colon.
+* GODT-2653: Only log when err is not nil.
+* GODT-2680: Fix for C++ debugger not working on ARM64 because of OpenSSL 3.1.
+* GODT-2675: Update GPA to applye togin-gonic/gin patch + update COPYING_NOTES.
+
+
+## Stone Bridge 3.3.2
+
+### Fixed
+* GODT-2782: Filter all labels when doing perma delete check.
+
+
+## Stone Bridge 3.3.1
+
+### Changed
+* GODT-2707: Set bridge-gui default log level to 'debug'.
+* GODT-2674: Add more logs during update failed.
+* GODT-2750: Disable raise on main window when a notification is clicked on Linux.
+* GODT-2709: Remove the config status file when user is removed.
+* GODT-2748: Log calls that cause main window to show, with reason.
+* GODT-2705: Added log entries for focus service on client and server sides.
+* GODT-2712: Feed config_status with user action while pending.
+* GODT-2728: Remove the sentry report for gRPC event stream interruptions in bridge-gui.
+* GODT-2715: Add Unitary test for configStatus event.
+* GODT-2715: Add Functional test for configStatus telemetry event.
+* Disable windows runner.
+* GODT-2714: Apply PR comments.
+* GODT-2714: Set Configuration Status to Failure and send Recovery event when issue is solved.
+* GODT-2713: Send config_progress event once a day if the configuration is stucked in pending for more than a day.
+* GODT-2711: Send config_abort event on User removal.
+* GODT-2710: Send config success on IMAP/SMTP connection..
+* GODT-2716: Make Configuration Statistics persistent.
+* GODT-2709: Init Configuration status.
+* Log errors on failed message Downloads.
+
+### Fixed
+* GODT-2774: Only check telemetry availability for the current user.
+* GODT-2774: Add external context to telemetry tasks.
+* GODT-2774: Add context to Authorize in `gluon.Connector`.
+* GODT-2726: Fix Parsing of Details field in GPA error message.
+* GODT-2708: Fix dimensions event format + handling of ReportClicked event.
+* GODT-2756: Fix for 'Settings' context menu opening the 'Help' page.
+
+
+## Stone Bridge 3.3.0
+
+### Changed
+* GODT-2653: Log API error details on Message import and send.
+* GODT-2655: Display internal build time tag in log and GUI.
+* Add error logs when messages fail to build during sync.
+* GODT-2673: Use NoClient as UserAgent without any client connected and...
+* GODT-2648: Make win build work on AWS machine.
+* Disable building of bridgepp-test app in build script.
+* GODT-2631: Bump go to 1.20.
+* GODT-2639: Enhance sentry init log.
+* GODT-2161: Auto-submit 2FA.
+* Bump Gluon for GODT-2595, GODT-2634 and GODT-2619.
+* Test: Fix TestBridge_Report.
+* Extend the timeout for integration test form 20m to 30.
+* Improve CPC code.
+* GODT-2585: Only Start IMAP/SMTP once one user is loaded.
+* GODT-2585: Server Manager.
+* GODT-2585: Add CPC utility.
+* GODT-2621: Display pop up warning when IMAP login fails because user is locked (connecting).
+* Set default log level to Debug.
+* GODT-2520: Update error message for free users.
+* Test: Disable sync open files test.
+* GODT-2346: Treat external address as disabled one.
+* GODT-2610: Re-use previous password when removing and adding back account.
+* GODT-2611: Bridge CLI exits on the first SIGINT / Ctrl+C.
+* GODT-2540: Make icon loading failure behavior consistent.
+* GODT-2540: Pop-up notification error icon is loaded on startup.
+* GODT-2540: Notify user of wrong IMAP password.
+
+### Fixed
+* GODT-2683: Only validate messages that are not appended to Drafts.
+* GODT-2683: Reduce message checks when appending into Drafts.
+* Fix linter errors.
+* GODT-2669: Display sentry ID in bridge init log.
+* GODT-2672: Fix context cancelled when IMAP/SMTP parameters change is in progress.
+* GODT-2650: Fix crash during header serialization.
+* GODT-2437: Fix lint, test + bump Gluon with silenced report.
+* GODT-2437: Silence harmless report to sentry.
+* GODT-2649: Clean up cache files after failed connector create (Gluon).
+* GODT-2638: Validate messages before import.
+* GODT-2646: Bump GPA and Gluon dependency after CIRCL upgrade.
+* GODT-2454: Only Send status update if transaction succeeded.
+* Test: fix flaky tests.
+* GODT-2628: Attempt to fix closed channel panic on logout.
+* GODT-2627: Properly handle recording of message with Bcc fields.
+* GODT-2627: Fix crash on closed channel.
+* GODT-2307: Removed deprecated macOS security framework function.
+* GODT-2637: Fix address parser error due to trailing separator.
+* GODT-2635: Ensure Bridge can be compiled with GCC 13.
+* GODT-2626: Handle rare crash due to missing address update ch.
+* GODT-2626: Server Events should not be merged.
+* GODT-2606: Improve Vault concurrency scopes.
+* GODT-2623: Log IMAP/SMTP login failure as error.
+* GODT-2527: Cleanup 503 test since handled by GPA.
+* GODT-2613: Install the TLS certificate in the user keychain.
+* GODT-2618: Crash when address does not have unlocked keyring.
+* GODT-2616: Silence out of Order UID report.
+* Update Gluon for async.Group.Do() fix.
+* Upgraded golangci-lint v1.52.2 and fixed all issues.
+* GODT-2464: Filter attachment name from content-type parameter to not send it twice to the API.
+
+
+## [Bridge 3.2.0] Rialto
+
+### Added
+* GODT-2552, GODT-2553, GODT-2555, GODT-2556: Add telemetry.
+* GODT-2575: Add dev info to cookies.
+
+### Changed
+* GODT-2598: Map Message Size Error to Gluon Error.
+* GODT-2569: Support multiple externalID matching if we send one of it when looking for parentID.
+* GODT-2576: Connector can send any flags to Gluon.
+* GODT-2496: Bump gopenPGP to 2.7.1-proton.
+* GODT-2517: Replace status window with native tray icon context menu.
+* GODT-2586: Two-columns layout for account details.
+* GODT-2580: Updated link to support website in GUI.
+* GODT-2239: Bridgepp worker/overseer unit tests.
+* GODT-2538: Implement smart picking of default IMAP/SMTP ports.
+* GODT-2502: Improve logs.
+* GODT-2551: Store and Recover Last User Agent from Vault.
+* GODT-2550: Verify IMAP ID is set properly.
+* GODT-2554: Compute telemetry availability from API UserSettings.
+* Add missing double quotes in test.
+* GODT-2239: Unit tests for BridgeUtils.cpp in bridgepp.
+* Replace go-rfc5322 with gluon's rfc5322 parser.
+* GODT-2483: Install cert without external tool on macOS.
+
+### Fixed
+* GODT-2625: Update Bridge pubkey for updates.
+* GODT-2620: Avoid stalls in case of panic in gluon.
+* GODT-2615: Remove keyboard shortcut for tray icon context menu on Windows and Linux.
+* GODT-2596: Fix bug when trying to generate Sentry report and there is not log.
+* GODT-1374: Fix tray icon DPI change handling.
+* GODT-2589: Update BUILDS.md.
+* GODT-2581: Update outdated link to bridge homepage in CLI 'manual' command.
+* GODT-2337: Filter reply-to on draft.
+* GODT-2550: Announce IMAP ID Capability.
+* GODT-2574: Fix label/unlabel of large amounts of messages.
+* GODT-2573: Handle invalid header fields in message.
+* GODT-2573: Crash on null update.
+* GODT-2407: Replace invalid email addresses with empty for new Drafts.
+
+## [Bridge 3.1.3] Quebec
+
+### Changed
+* GODT-2616: Silence UID of order report.
+* GODT-2614: Handle failed update during sync.
+
+
+## [Bridge 3.1.2] Quebec
+
+### Changed
+* GODT-2582 Dedup recovered messages folder.
+
+## [Bridge 3.1.1] Quebec
+
+### Fixed
+* GODT-2500: Fix handler passing.
+
+
+## [Bridge 3.1.0] Quebec
+
+### Changed
+* GODT-2523: Use software QML rendering backend by default on Windows.
+* GODT-2500: Reorganise async methods.
+* GODT-2500: Add panic handlers everywhere.
+* GODT-2511: Add bridge-gui switches to permanently select the QML rendering backend.
+* GODT-2509: Migrate TLS cert from v1/v2 location during upgrade to v3.
+* GODT-2487: Add windows test job and worker.
+* Update GPA to include detailed error messages.
+* GODT-2479: Ensure messages always have a text body part.
+* GODT-2482: More attachment to relevant exceptions.
+* GODT-2224: Refactor bridge sync to use less memory.
+* GODT-2448: Supported Answered flag.
+* GODT-2382: Added bridge-gui settings file with 'UseSoftwareRenderer' value.
+* GODT-2411: Allow qmake executable to be named qmake6.
+* GODT-2273: Menu with "Close window" and "Quit Bridge" button in main window.
+* GODT-2261: Sync progress in GUI.
+* GODT-2385: Gluon cache fallback.
+* GODT-2366: Handle failed message updates as creates.
+* GODT-2201: Bump Gluon to use pure Go IMAP parser.
+* GODT-2374: Import TLS certs via shell.
+* GODT-2361: Bump GPA to use simple encrypter.
+* GODT-1264: Constraint on Scheduled mailbox in connector + Integration tests.
+* GODT-1264: Creation and visibility of the 'Scheduled' system label.
+* GODT-2283: Limit max import size to 30MB (bump GPA to v0.4.0).
+* GODT-2352: Only copy resource file when needed.
+* GODT-2352: Use go-build-finalize macro to build vault-editor for both mac arch.
+* GODT-2278: Properly override server_name for go.
+* GODT-2255: Randomize the focus service port.
+* GODT-2144: Handle IMAP/SMTP server errors via event stream.
+* GODT-2144: Delay IMAP/SMTP server start until all users are loaded.
+* GODT-2295: Notifications for IMAP login when signed out.
+* GODT-2278: Improve sentry logs.
+* GODT-2289: UIDValidity as Timestamp.
+
+### Fixed
+* GODT-2505: Show notification only for cases when user needs to do actions.
+* GODT-2516: Log error when the vault key cannot be created/loaded from the keychain.
+* GODT-2526: Fix high memory usage with fetch/search.
+* GODT-2514: Apply Retry-After to 503.
+* GODT-2524: Preserve old vault values.
+* GODT-2508: Handle Address Updated for none-existing address.
+* GODT-2504: Fix missing attachments in imported message.
+* GODT-2513: Scanner Crash in Gluon.
+* GODT-2512: Catch unhandled API errors.
+* GODT-2507: Memory consumption bug.
+* GODT-2497: Do not report EOF and network errors.
+* GODT-2481: Fix DBUS Secert Service.
+* GODT-2455: Upper limit for number of merged events.
+* GODT-2480: Do not override X-Original-Date with invalid Date.
+* GODT-2473: Fix handling of complex mime types.
+* GODT-2469: Fix sentry revision hash for cmake on windows.
+* GODT-2424: Sync Builder Message Split.
+* GODT-2419: Use connector.ErrOperationNotAllowed.
+* GODT-2418: Ensure child folders are updated when parent is.
+* GODT-1945: Handle disabled addresses correctly.
+* GODT-2390: Add reports for uncaught json and net.opErr.
+* GODT-2393: Improved handling of unrecoverable error.
+* GODT-2394: Bump Gluon for golang.org/x/text DoS risk.
+* GODT-2387: Ensure vault can be unlocked after factory reset.
+* GODT-2389: Close bridge on exception and add max termination wait time.
+* GODT-2201: Add missing rfc5322.CharsetReader initialization.
+* GODT-1804: Preserve MIME parameters when uploading attachments.
+* GODT-2312: Used space is properly updated.
+* GODT-2319: Seed the math/rand RNG on app startup.
+* GODT-2272: Use shorter filename for gRPC file socket.
+* GODT-2318: Remove gluon DB if label sync was incomplete.
+* GODT-2326: Only run sync after addIMAPUser().
+* GODT-2323: Fix Expunge not issued for move.
+* GODT-2224: Properly handle context cancellation during sync.
+* GODT-2328: Ignore labels that aren't part of user label set.
+* GODT-2326: Fix potential Win32 API deadlock.
+* GODT-1804: Only promote content headers if non-empty.
+* GODT-2327: Remove unnecessary sync when changing address mode.
+* GODT-2343: Only poll after send if sync is complete.
+* GODT-2336: Recover from changed address order while bridge is down.
+* GODT-2347: Prevent updates from being dropped if goroutine doesn't start fast.
+* GODT-2351: Bump GPA to properly handle net.OpError and add tests.
+* GODT-2351: Bump GPA to automatically retry on net.OpError.
+* GODT-2365: Use predictable remote ID for placeholder mailboxes.
+* GODT-2381: Unset draft flag on sent messages.
+* GODT-2380: Only set external ID in header if non-empty.
+
+
+## [Bridge 3.0.21] Perth Narrows
+
+### Added
+* GODT-2509: Migrate TLS cert from v1/v2 location during upgrade to v3.
+
+### Changed
+* GODT-2516: log error when the vault key cannot be created/loaded from the keychain.
+
+### Fixed
+* GODT-2501: Remove additional .desktop file.
+* GODT-2513: Crash in scanner.
+* GODT-2481: Fix DBUS Secert Service.
+* GODT-2512: Catch unhandled API errors.
+* GODT-2469: Fix sentry revision hash for cmake on windows.
+
+
+## [Bridge 3.0.20] Perth Narrows
+
+### Added
+* GODT-2442: Allow user to re-sync DB without logout.
+
+### Changed
+* GODT-2419: Reduce sentry reports.
+* GODT-2458: Wait for both bridge and bridge-gui to be ended before restarting on crash.
+* GODT-2457: Include address if GetPublickKeys() error message.
+* GODT-2446: Attach logs to sentry reports for relevant bridge-gui exceptions.
+* GODT-2425: Out of sync messages and read status.
+* GODT-2435: Group report exception by message if exception message looks corrupted.
+* GODT-2356: Unify sentry release description and add more context to it.
+* GODT-2357: Hide DSN_SENTRY and use single setting point for DSN_SENTRY.
+* GODT-2444: Bad event info.
+* GODT-2447: Don't assume timestamp exists in log filename.
+* GODT-2333: Do not allow modifications to All Mail label.
+* GODT-2429: Do not report context cancel to sentry.
+
+### Fixed
+* GODT-2467: elide long email addresses in 'bad event' QML notification dialog.
+* GODT-2449: fix bug in Bridge-GUI's Exception::what().
+* GODT-2427: Parsing header issues.
+* GODT-2426: Fix crash on user delete.
+* GODT-2417: Do not request gluon recovered message from API.
+
+
+## [Bridge 3.0.19] Perth Narrows
+
+### Fixed
+* GODT-2364: Wait and retry once if the gRPC service config file exists but cannot be opened.
+* GODT-2364: Added optional details to C++ exceptions.
+* GODT-2413: Use qEnvironmentVariable() instead of qgetenv().
+* GODT-2412: Don't treat context cancellation as BadEvent.
+* GODT-2404: Handle unexpected EOF.
+* GODT-2400: Allow state updates to be applied if command fails.
+* GODT-2399: Fix immediate message deletion during updates.
+* GODT-2390: Missing changes from previous commit.
+* GODT-2390: Add reports for uncaught json and net.opErr.
+* GODT-2414: Multiple deletion bug in WriteControlledStore.
+
+
+## [Bridge 3.0.18] Perth Narrows
+
+### Fixed
+* GODT-2392: Create message if gluon updateMessage returns `no such message`.
+* GODT-2391: Create draft if missing during message update on gluon side.
+
+## [Bridge 3.0.16/17] Perth Narrows
+
+### Fixed
+* GODT-2371: Continue, not return, when handling draft.
+
+## [Bridge 3.0.15] Perth Narrows
+
+### Changed
+* GODT-2355: Improve wording and actions on bad event.
+
+### Fixed
+* GODT-2354: Report failed load users.
+* GODT-2353: Show popup only after 3.0.16.
+* GODT-2351: Bump GPA to better handle net.OpError.
+
+
+## [Bridge 3.0.14] Perth Narrows
+
+### Fixed
+* GODT-2323: Fix Expunge not issued for move.
+* GODT-2341: Handle URL error.
+* GODT-2340: Improve logging.
+* GODT-2278: Improve sentry logs.
+* GODT-2327: Sync issues when migrating DB.
+* GODT-2318: Remove gluon DB if label sync was incomplete.
+* GODT-1804: Only promote content headers if non-empty.
+* GODT-2343: Only poll after send if sync is complete.
+* GODT-2336: Recover from changed address order while bridge is down.
+
+
+
+## [Bridge 3.0.13] Perth Narrows
+
+### Fixed
+GODT-2328: Ignore labels that aren't part of user label set.
+GODT-2326: Sync issue on missing fresh DB file.
+GODT-2319: Seed the math/rand RNG on app startup.
+GODT-1804: Preserve MIME parameters when uploading attachments.
+
+
+## [Bridge 3.0.12] Perth Narrows
+
+### Added
+* GODT-2210: v3.0 splash screen.
+* GODT-1770: handle UserBadEvent in CLI and gRPC.
+
+### Changed
+* GODT-2311: Fix missing headers in re-downloaded Gluon messages.
+* GODT-1453: clicking 'Sign in' from status window now selects the right account.
+* GODT-2297: More significantly improve GPA's paging algorithm.
+* GODT-2145: Fix button spacing w/ Qt 6.4.
+* GODT-2223: Improve event handling.
+* GODT-2305: Detect missing gluon DB.
+* GODT-2291: Change gluon store default location from Cache to Data.
+* Other: Disable dialer test until badssl cert is bumped.
+* GODT-2292: Updated BUILDS.md doc.
+* GODT-2258: suggest email as login when signing in via status window.
+* Other: Report corrupt and/or insecure vaults to sentry.
+* Other: Better user load logs.
+* GODT-2253: Restart Launcher from the gui when GUI crashes.
+* Other(test): Make All Mail copy test more robust.
+* Other(CI): Make race checks manual.
+* Other: Remove old cert/key file location handling.
+* GODT-2271: Update README with new system files path.
+
+### Fixed
+* GODT-2210: Fix splash screen always showing on CentOS and Ubuntu.
+* GODT-2296: Log error rather than fail if cannot get parent ID.
+* GODT-2266: Pause event stream while sending.
+* GODT-2266: Add test for sent message flags.
+* Other(test): Fix some more integration test placeholders.
+* GODT-2177: Use correct attachment disposition when content ID is set.
+* GODT-1556: If no references, use the in-reply-to header as ParentID.
+* Other: make GUI Tester more resilient to Bridge abrupt termination.
+* GODT-2275: fixed location of bridge-gui log files.
+* Other: Ensure SMTP debug dump works on windows.
+* Other: Fix MaxLogs off-by-one limit and bump limit to 10.
+* Other: fix path of temp folder in README.
+* Other(debug): Dump raw SMTP input to user's home dir.
+
+
+## [Bridge 3.0.11] Perth Narrows
+
+### Changed
+* GODT-2252: Recover from deleted cached messages.
+* GODT-2258: change login label and suggest email instead of username.
+* Other: Don't clean settings path on teardown.
+* Other: Bump GPA to v0.3.0.
+* Other: added user's primary email address to the vault.
+* GODT-2251: gluon store and DB separated.
+* GODT-2093: use the primary email address in the account view and status view.
+* GODT-2202: Report update errors from Gluon.
+* GODT-2229: Own the full path for gluon and do not change Database path.
+* GODT-1797: copyright notice shows a date range with the build year.
+
+### Fixed
+* GODT-2223: Handle bad events by logging user out.
+* GODT-2165: Reduce UTF8 parsing errors from TLS header input.
+* Others: chores fix a QML warning when no account is present* and a few typos in QML.
+* Other(test): Fix integration test steps.
+* GODT-2226: Fix moving drafts to trash.
+* GODT-2246: do not report API error 422 when using an invalid email address.
 
 
 ## [Bridge 3.0.10] Perth Narrows
@@ -233,7 +949,7 @@ Changelog [format](http://keepachangelog.com/en/1.0.0/)
 ## [Bridge 2.4.6] Osney
 
 ### Changed
-* GODT-2019: When signing out and a single user is connecte* we do not go back to the welcome screen.
+* GODT-2019: When signing out and a single user is connected we do not go back to the welcome screen.
 * GODT-2071: Bridge-gui report error if an orphan bridge is detected.
 * GODT-2046: Bridge-gui log is included in optional archive sent with bug reports.
 * GODT-2039: Bridge monitors bridge-gui via its PID.
@@ -387,7 +1103,7 @@ Changelog [format](http://keepachangelog.com/en/1.0.0/)
     * GODT-1260: Renaming.
     * GODT-1502: Rebranding: color and radius.
 * GODT-1549: Add notification when address list changes.
-* GODT-1560: Dependecy licenses update and link.
+* GODT-1560: Dependency licenses update and link.
 
 ### Changed
 * GODT-1543: Using one buffered event for off and on connection.
@@ -484,7 +1200,7 @@ GODT-1537: Manual in-app update mechanism.
     * GODT-1338: GODT-1343 Help view buttons.
     * GODT-1340: Not crashing, user list updating in main thread.
     * GODT-1345: Adding panic handlers.
-    * GODT-1271: Fix Status margings.
+    * GODT-1271: Fix Status margins.
     * GODT-1320: Add loading property to each action within a notification.
     * GODT-1210: Add "free user" banner.
     * GODT-1314: Limit description field length within 150/800 bounds.
@@ -526,7 +1242,7 @@ GODT-1537: Manual in-app update mechanism.
     * GODT-1381 Treat readonly folder as failure for cache on disk.
     * GODT-1431 Prevent watcher when not using disk on cache.
     * GODT-1381: Use in-memory cache in case local cache is unavailable.
-    * GODT-1356 GODT-1302: Cache on disk concurency and API retries.
+    * GODT-1356 GODT-1302: Cache on disk concurrency and API retries.
     * GODT-1332 Added tests for cache move functions.
     * GODT-1332: moved cache related functions to separate file.
     * GODT-1332 moving cache does not work on Windows.
@@ -777,7 +1493,7 @@ GODT-1537: Manual in-app update mechanism.
 ### Fixed
 * GODT-1029 Fix tray icon not updating under certain conditions.
 * GODT-1062 Fix lost notification bar when window is closed.
-* GODT-1058 Install version after chaning channel right away only in case of downgrade.
+* GODT-1058 Install version after changing channel right away only in case of downgrade.
 * GODT-1073 Re-write autostart link on every start if turned on in preferences.
 * GODT-1055 Fix flaky empty trash test.
 
@@ -867,7 +1583,7 @@ GODT-1537: Manual in-app update mechanism.
 * GODT-820 Added GUI notification on impossibility of update installation (both silent and manual).
 * GODT-870 Added GUI notification on error during silent update.
 * GODT-805 Added GUI notification on update available.
-* GODT-804 Added GUI notification on silent update installed (promt to restart).
+* GODT-804 Added GUI notification on silent update installed (prompt to restart).
 * GODT-275 Added option to disable autoupdates in settings (default autoupdate is enabled).
 * GODT-874 Added manual triggers to Updater module.
 * GODT-851 Added support of UID EXPUNGE.
@@ -1191,7 +1907,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 
 ### Changed
 * GODT-360 Detect charset embedded in html/xml.
-* GODT-354 Do not label/unlabel messsages from `All Mail` folder.
+* GODT-354 Do not label/unlabel messages from `All Mail` folder.
 * GODT-388 Support for both bridge and import/export credentials by package users.
 * GODT-387 Store factory to make store optional.
 * GODT-386 Renamed bridge to general users and keep bridge only for bridge stuff.
@@ -1356,13 +2072,13 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * GODT-88 Run mbox sync in parallel when switch password mode (re-init not user).
 * GODT-95 Do not throw error when trying to create new mailbox in IMAP root.
 * GODT-75 Do not fail on unlabel inside delete.
-* #1095 always delete IMAP USER including wrong pasword.
+* #1095 always delete IMAP USER including wrong password.
 * Unique pmapi client userID (including #1098).
 * Using go.enmime@v0.6.1 snapshot.
 * Better detection of non-auth-error.
 * Reset `hasAuthChannel` during logout for proper login functionality (set up auth channel and unlock keys).
 * Allow `APPEND` messages without parsable email address in sender field.
-* #1060 avoid `Append` after internal message ID was found and message was copyed to mailbox using `MessageLabel`.
+* #1060 avoid `Append` after internal message ID was found and message was copied to mailbox using `MessageLabel`.
 * #1049 Basic usage of store in SMTP package to poll event loop during sending message.
 * #1050 pollNow waits for events to be processed.
 * #1047 Fix fetch of empty mailbox.
@@ -1488,7 +2204,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * #903 added http.Client timeout to not hang out forever.
 * Closing body after checking internet connection.
 * Pedantic lint for bridgeUtils.
-* Selected events are buffered and emited again when frontend loop is ready.
+* Selected events are buffered and emitted again when frontend loop is ready.
 * #890 implemented 2FA endpoint (auth split).
 * #888 TLS Cert.
     * Error bar and modal with explanation in GUI.
@@ -1496,7 +2212,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
     * Add pinning to bridge (only for live API builds).
 * #887 #883:
  * Wait before clearing data.
- * Configer which provides pmapi.ClientConfig and app directories.
+ * Configure which provides pmapi.ClientConfig and app directories.
 * #861 restart after clear data.
 * Panic handler for all goroutines.
 * CD for linux.
@@ -1544,7 +2260,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * #882 unassign PMAPI client after logout and force to run garbage collector.
 * #880, #884, #885, #886 fix of informing user about outgoing non-encrypted e-mail.
 * #838 `Sirupsen` -> `sirupsen`.
-* #893 save panic report file everytime.
+* #893 save panic report file every time.
 * #880 fix of informing user about outgoing non-encrypted e-mail.
 * Fix aliases in split mode.
 * Fix decrypted data in log notification.
@@ -1618,7 +2334,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 
 ### Changed
 * Fix custom message format.
-* #802 acumulated long lines while parsing body structure.
+* #802 accumulated long lines while parsing body structure.
 * Process `AddressEvent` before `MessageEvent`.
 * #791 updated crypto: fix wrong signature format.
 * #793 fix returning size.
@@ -1640,7 +2356,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 
 ### Changed
 * #748 when charset missing assume utf8 and check the validity.
-* #750 before sync check that events are uptodate, if not poll events instead of sync.
+* #750 before sync check that events are up-to-date, if not poll events instead of sync.
 * Use pmapi with support of decrypted access token.
 * #750 Status is using DB status instead of API.
 * Format panic error as string instead of struct dump.
@@ -1657,7 +2373,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * Full version of program visible on release notes.
 
 ### Changed
-* #720 only one concurent DB sync.
+* #720 only one concurrent DB sync.
 * #720 sync every 3 pages.
 * #512 extending list of charsets go-pm-mime!4.
 
@@ -1681,7 +2397,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * Fix srp modulus issue with new `ProtonMail/crypto`.
 * Generate version files from main file.
 * Be able to set update set on build.
-* #597 check on start that certificat will be still valid after one month and generate new cert if not.
+* #597 check on start that certificate will be still valid after one month and generate new cert if not.
 * #597 extended certificate validity to 2 years.
 * Copyright 2019.
 * Exclude `protontech` repos from credits.
@@ -1700,7 +2416,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * #592 internal references are added only when not present already.
 * #592 field `Date` changed to m.Time only when wrong format or missing `Date`.
 * #645 pmapi#26 `Message.Flags` instead of `IsEncrypted`, `Type`, `IsReplied`, `IsRepliedAll`, `IsForwarded`.
-* DB: do not allow to put Body or Attachements to db.
+* DB: do not allow to put Body or Attachments to db.
 * #574 SMTP: can now send more than one email.
 * #671 Verbosity levels: `debug` (only bridge), `debug-client` (bridge and client communication), `debug-server` (bridge, whole SMTP/IMAP communication).
 * #644 Return rfc.size 0 or correct size of fetched body (stored in DB).
@@ -1772,7 +2488,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * Start with new versioning.
 
           1.1.0
-          | | `--- bug fix number (internal, irregular, beta relases)
+          | | `--- bug fix number (internal, irregular, beta releases)
           | `----- minor version (features, release once per month, live release, milestones)
           `------- major version (big changes, once per year, breaking changes, api force upgrade)
 
@@ -1838,7 +2554,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * All `client.Do` errors are interpreted as connection issue.
 * Moved to internal gitlab.
 * Typo `frontend-qml`.
-* Better message for case when server is not reacheable.
+* Better message for case when server is not reachable.
 * Setting 1min timeout to IMAP connection.
 
 ### Changed
@@ -1870,12 +2586,12 @@ CSB-331 Fix sending error due to mixed case in sender address.
 * Keychain format and function refactor.
 * Create crash file on panic with full trace.
 * Clear old data only in main process (no double keychain typing).
-* Create label udpate API route.
+* Create label update API route.
 * Selectable text in release notes.
 
 ### Added
 * Support sending to external PGP recipients.
-* Return error codes: `0: Ok`, `2: Frontend crashed`, `3: Bridge already running`, `4: Uknown argument`, `42: Restart application`.
+* Return error codes: `0: Ok`, `2: Frontend crashed`, `3: Bridge already running`, `4: Unknown argument`, `42: Restart application`.
 
 ### Release notes
 * Support of encryption to external PGP recipients using contacts created on beta.protonmail.com (see https://protonmail.com/blog/pgp-vulnerability-efail/ to understand the vulnerabilities that may be associated with sending to other PGP clients).
@@ -1900,7 +2616,7 @@ CSB-331 Fix sending error due to mixed case in sender address.
     * Bug report window.
     * Checkbox and with label (only I/E).
     * Error dialog and Info tooltip (only I/E).
-    * Add user modal formating (colors, text).
+    * Add user modal formatting (colors, text).
     * Account view style.
     * Input box style (used in bug report).
     * Input field style (used in add account and change port).

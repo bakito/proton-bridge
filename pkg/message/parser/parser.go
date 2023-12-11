@@ -18,8 +18,9 @@
 package parser
 
 import (
-	"fmt"
 	"io"
+	"mime"
+	"strings"
 
 	"github.com/emersion/go-message"
 	"github.com/sirupsen/logrus"
@@ -69,16 +70,52 @@ func (p *Parser) Root() *Part {
 }
 
 func (p *Parser) AttachPublicKey(key, keyName string) {
-	h := message.Header{}
+	encName := mime.QEncoding.Encode("utf-8", keyName+".asc")
+	params := map[string]string{"name": encName, "filename": encName}
 
-	h.Set("Content-Type", fmt.Sprintf(`application/pgp-keys; name="%v.asc"; filename="%v.asc"`, keyName, keyName))
-	h.Set("Content-Disposition", fmt.Sprintf(`attachment; name="%v.asc"; filename="%v.asc"`, keyName, keyName))
+	h := message.Header{}
+	h.Set("Content-Type", mime.FormatMediaType("application/pgp-keys", params))
+	h.Set("Content-Disposition", mime.FormatMediaType("attachment", params))
 	h.Set("Content-Transfer-Encoding", "base64")
 
 	p.Root().AddChild(&Part{
 		Header: h,
 		Body:   []byte(key),
 	})
+}
+
+func (p *Parser) AttachEmptyTextPartIfNoneExists() bool {
+	root := p.Root()
+	if root.isMultipartMixed() {
+		for _, v := range root.children {
+			// Must be an attachment of sorts, skip.
+			if v.Header.Has("Content-Disposition") {
+				continue
+			}
+			contentType, _, err := v.Header.ContentType()
+			if err == nil && strings.HasPrefix(contentType, "text/") {
+				// Message already has text part
+				return false
+			}
+		}
+	} else {
+		contentType, _, err := root.Header.ContentType()
+		if err == nil && strings.HasPrefix(contentType, "text/") {
+			// Message already has text part
+			return false
+		}
+	}
+
+	h := message.Header{}
+
+	h.Set("Content-Type", "text/plain;charset=utf8")
+	h.Set("Content-Transfer-Encoding", "quoted-printable")
+
+	p.Root().AddChild(&Part{
+		Header: h,
+		Body:   nil,
+	})
+	return true
 }
 
 // Section returns the message part referred to by the given section. A section

@@ -20,6 +20,7 @@ package grpc
 import (
 	"context"
 
+	"github.com/ProtonMail/gluon/async"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -49,7 +50,7 @@ func (s *Service) RunEventStream(request *EventStreamRequest, server Bridge_RunE
 	// if events occurred before streaming started, they've been queued. Now that the stream channel is available
 	// we can flush the queued
 	go func() {
-		defer s.panicHandler.HandlePanic()
+		defer async.HandlePanic(s.panicHandler)
 
 		s.eventQueueMutex.Lock()
 		defer s.eventQueueMutex.Unlock()
@@ -110,7 +111,7 @@ func (s *Service) SendEvent(event *StreamEvent) error {
 }
 
 // StartEventTest sends all the known event via gRPC.
-func (s *Service) StartEventTest() error { //nolint:funlen
+func (s *Service) StartEventTest() error {
 	const dummyAddress = "dummy@proton.me"
 	events := []*StreamEvent{
 		// app
@@ -125,7 +126,7 @@ func (s *Service) StartEventTest() error { //nolint:funlen
 		// login
 		NewLoginError(LoginErrorType_FREE_USER, "error"),
 		NewLoginTfaRequestedEvent(dummyAddress),
-		NewLoginTwoPasswordsRequestedEvent(),
+		NewLoginTwoPasswordsRequestedEvent(dummyAddress),
 		NewLoginFinishedEvent("userID", false),
 		NewLoginAlreadyLoggedInEvent("userID"),
 
@@ -165,7 +166,6 @@ func (s *Service) StartEventTest() error { //nolint:funlen
 		NewKeychainRebuildKeychainEvent(),
 
 		// mail
-		NewMailNoActiveKeyForRecipientEvent(dummyAddress),
 		NewMailAddressChangeEvent(dummyAddress),
 		NewMailAddressChangeLogoutEvent(dummyAddress),
 		NewMailApiCertIssue(),
@@ -174,6 +174,7 @@ func (s *Service) StartEventTest() error { //nolint:funlen
 		NewUserToggleSplitModeFinishedEvent("userID"),
 		NewUserDisconnectedEvent("username"),
 		NewUserChangedEvent("userID"),
+		NewUsedBytesChangedEvent("userID", 1000),
 	}
 
 	for _, event := range events {

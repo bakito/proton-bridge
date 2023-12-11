@@ -18,6 +18,8 @@
 
 #include "Pch.h"
 #include "CommandLine.h"
+#include "Settings.h"
+#include <bridgepp/SessionID/SessionID.h>
 
 
 using namespace bridgepp;
@@ -28,7 +30,10 @@ namespace {
 
 QString const launcherFlag = "--launcher"; ///< launcher flag parameter used for bridge.
 QString const noWindowFlag = "--no-window"; ///< The no-window command-line flag.
-QString const softwareRendererFlag = "--software-renderer"; ///< The 'software-renderer' command-line flag.
+QString const softwareRendererFlag = "--software-renderer"; ///< The 'software-renderer' command-line flag. enable software rendering for a single execution
+QString const setSoftwareRendererFlag = "--set-software-renderer"; ///< The 'set-software-renderer' command-line flag. Software rendering will be used for all subsequent executions of the application.
+QString const setHardwareRendererFlag = "--set-hardware-renderer"; ///< The 'set-hardware-renderer' command-line flag. Hardware rendering will be used for all subsequent executions of the application.
+
 
 //****************************************************************************************************************************************************
 /// \brief parse a command-line string argument as expected by go's CLI package.
@@ -98,7 +103,16 @@ CommandLineOptions parseCommandLine(int argc, char *argv[]) {
         // we can't use QCommandLineParser here since it will fail on unknown options.
         // Arguments may contain some bridge flags.
         if (arg == softwareRendererFlag) {
+            options.bridgeGuiArgs.append(arg);
             options.useSoftwareRenderer = true;
+        }
+        if (arg == setSoftwareRendererFlag) {
+            app().settings().setUseSoftwareRenderer(true);
+            continue; // setting is permanent. no need to keep/pass it to bridge for restart.
+        }
+        if (arg == setHardwareRendererFlag) {
+            app().settings().setUseSoftwareRenderer(false);
+            continue; // setting is permanent. no need to keep/pass it to bridge for restart.
         }
         if (arg == noWindowFlag) {
             options.noWindow = true;
@@ -113,10 +127,12 @@ CommandLineOptions parseCommandLine(int argc, char *argv[]) {
         else if (arg == "--attach" || arg == "-a") {
             // we don't keep the attach mode within the args since we don't need it for Bridge.
             options.attach = true;
+            options.bridgeGuiArgs.append(arg);
         }
 #endif
         else {
             options.bridgeArgs.append(arg);
+            options.bridgeGuiArgs.append(arg);
         }
     }
     if (!flagFound) {
@@ -126,6 +142,15 @@ CommandLineOptions parseCommandLine(int argc, char *argv[]) {
     }
 
     options.logLevel = parseLogLevel(argc, argv);
+
+    QString sessionID = parseGoCLIStringArgument(argc, argv, { "session-id" });
+    if (sessionID.isEmpty()) {
+        // The session ID was not passed to us on the command-line -> create one and add to the command-line for bridge
+        sessionID = newSessionID();
+        options.bridgeArgs.append("--session-id");
+        options.bridgeArgs.append(sessionID);
+    }
+    app().setSessionID(sessionID);
 
     return options;
 }
