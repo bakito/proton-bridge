@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -26,9 +26,10 @@ import (
 
 	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/gluon/logging"
-	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/observability"
+	obsMetrics "github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice/observabilitymetrics"
 	"github.com/bradenaw/juniper/parallel"
 	"github.com/bradenaw/juniper/xslices"
 	"github.com/sirupsen/logrus"
@@ -50,8 +51,10 @@ type BuildStage struct {
 	maxBuildMem uint64
 
 	panicHandler async.PanicHandler
-	reporter     reporter.Reporter
 	log          *logrus.Entry
+
+	// Observability
+	observabilitySender observability.Sender
 }
 
 func NewBuildStage(
@@ -59,15 +62,15 @@ func NewBuildStage(
 	output BuildStageOutput,
 	maxBuildMem uint64,
 	panicHandler async.PanicHandler,
-	reporter reporter.Reporter,
+	observabilitySender observability.Sender,
 ) *BuildStage {
 	return &BuildStage{
-		input:        input,
-		output:       output,
-		maxBuildMem:  maxBuildMem,
-		log:          logrus.WithField("sync-stage", "build"),
-		panicHandler: panicHandler,
-		reporter:     reporter,
+		input:               input,
+		output:              output,
+		maxBuildMem:         maxBuildMem,
+		log:                 logrus.WithField("sync-stage", "build"),
+		panicHandler:        panicHandler,
+		observabilitySender: observabilitySender,
 	}
 }
 
@@ -101,6 +104,23 @@ func (b *BuildStage) run(ctx context.Context) {
 			continue
 		}
 
+		if len(req.batch) == 0 {
+			// it is possible that if one does a mass delete on another client an entire download batch fails,
+			// and we reach this point without any messages to build.
+			req.onStageCompleted(ctx)
+
+			if err := b.output.Produce(ctx, ApplyRequest{
+				childJob: req.childJob,
+				messages: nil,
+			}); err != nil {
+				err = fmt.Errorf("failed to produce output for next stage: %w", err)
+				logrus.Errorf(err.Error())
+				req.job.onError(err)
+			}
+
+			continue
+		}
+
 		err = req.job.messageBuilder.WithKeys(func(_ *crypto.KeyRing, addrKRs map[string]*crypto.KeyRing) error {
 			chunks := chunkSyncBuilderBatch(req.batch, b.maxBuildMem)
 
@@ -119,7 +139,7 @@ func (b *BuildStage) run(ctx context.Context) {
 					return nil
 				}
 
-				result, err := parallel.MapContext(ctx, maxMessagesInParallel, chunk, func(ctx context.Context, msg proton.FullMessage) (BuildResult, error) {
+				result, err := parallel.MapContext(ctx, maxMessagesInParallel, chunk, func(_ context.Context, msg proton.FullMessage) (BuildResult, error) {
 					defer async.HandlePanic(b.panicHandler)
 
 					kr, ok := addrKRs[msg.AddressID]
@@ -130,35 +150,24 @@ func (b *BuildStage) run(ctx context.Context) {
 							req.job.log.WithError(err).Error("Failed to add failed message ID")
 						}
 
-						if err := b.reporter.ReportMessageWithContext("Failed to build message - no unlocked keyring (sync)", reporter.Context{
-							"messageID": msg.ID,
-							"userID":    req.userID(),
-						}); err != nil {
-							req.job.log.WithError(err).Error("Failed to report message build error")
-						}
+						b.observabilitySender.AddDistinctMetrics(observability.SyncError, obsMetrics.GenerateNoUnlockedKeyringMetric())
 						return BuildResult{}, nil
 					}
 
 					res, err := req.job.messageBuilder.BuildMessage(req.job.labels, msg, kr, new(bytes.Buffer))
 					if err != nil {
-						req.job.log.WithError(err).WithField("msgID", msg.ID).Error("Failed to build message (syn)")
+						req.job.log.WithError(err).WithField("msgID", msg.ID).Error("Failed to build message (sync)")
 
 						if err := req.job.state.AddFailedMessageID(req.getContext(), msg.ID); err != nil {
 							req.job.log.WithError(err).Error("Failed to add failed message ID")
 						}
 
-						if err := b.reporter.ReportMessageWithContext("Failed to build message (sync)", reporter.Context{
-							"messageID": msg.ID,
-							"error":     err,
-							"userID":    req.userID(),
-						}); err != nil {
-							req.job.log.WithError(err).Error("Failed to report message build error")
-						}
-
+						b.observabilitySender.AddDistinctMetrics(observability.SyncError, obsMetrics.GenerateFailedToBuildMetric())
 						// We could sync a placeholder message here, but for now we skip it entirely.
 						return BuildResult{}, nil
 					}
 
+					b.observabilitySender.AddMetrics(obsMetrics.GenerateMessageBuiltSuccessMetric())
 					return res, nil
 				})
 				if err != nil {

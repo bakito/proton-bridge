@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -20,9 +20,11 @@ package user
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/proton-bridge/v3/internal/configstatus"
+	"github.com/ProtonMail/proton-bridge/v3/internal/kb"
 )
 
 func (user *User) SendConfigStatusSuccess(ctx context.Context) {
@@ -193,39 +195,25 @@ func (user *User) AutoconfigUsed(client string) {
 	}
 }
 
-func (user *User) ExternalLinkClicked(article string) {
+func (user *User) ExternalLinkClicked(url string) {
 	if !user.configStatus.IsPending() {
 		return
 	}
 
-	var trackedLinks = [...]string{
-		"https://proton.me/support/bridge",
-		"https://proton.me/support/protonmail-bridge-clients-apple-mail",
-		"https://proton.me/support/protonmail-bridge-clients-macos-outlook-2019",
-		"https://proton.me/support/protonmail-bridge-clients-windows-outlook-2019",
-		"https://proton.me/support/protonmail-bridge-clients-windows-thunderbird",
-		"https://proton.me/support/protonmail-bridge-configure-client",
-		"https://proton.me/support/bridge-address-list-has-changed",
-		"https://proton.me/blog/tls-ssl-certificate#Extra-security-precautions-taken-by-ProtonMail",
-		"https://proton.me/support/bridge-cant-move-cache",
-		"https://proton.me/support/difference-combined-addresses-mode-split-addresses-mode",
-		"https://proton.me/support/bridge-imap-login-failed",
-		"https://proton.me/support/port-already-occupied-error",
-		"https://proton.me/support/bridge-cannot-access-keychain",
-		"https://proton.me/support/protonmail-bridge-manual-update",
-		"https://proton.me/support/bridge-internal-error",
-		"https://proton.me/support/apple-mail-certificate",
-		"https://proton.me/support/macos-certificate-warning",
-		"https://proton.me/support/why-you-need-bridge",
+	const externalLinkWasClicked = "External link was clicked."
+	index, err := kb.GetArticleIndex(url)
+	if err != nil {
+		if errors.Is(err, kb.ErrArticleNotFound) {
+			user.log.WithField("report", false).WithField("url", url).Debug(externalLinkWasClicked)
+		} else {
+			user.log.WithError(err).Error("Failed to retrieve list of KB articles.")
+		}
+		return
 	}
 
-	for id, url := range trackedLinks {
-		if url == article {
-			if err := user.configStatus.RecordLinkClicked(uint(id)); err != nil {
-				user.log.WithError(err).Error("Failed to log LinkClicked in config_status.")
-			}
-			return
-		}
+	if err := user.configStatus.RecordLinkClicked(index); err != nil {
+		user.log.WithError(err).Error("Failed to log LinkClicked in config_status.")
+	} else {
+		user.log.WithField("report", true).WithField("url", url).Debug(externalLinkWasClicked)
 	}
-	user.log.WithField("article", article).Error("Failed to find KB article id.")
 }

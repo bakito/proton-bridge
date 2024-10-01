@@ -5,11 +5,6 @@
         <file>qml/AccountView.qml</file>
         <file>qml/Banner.qml</file>
         <file>qml/Bridge.qml</file>
-        <file>qml/BugCategoryView.qml</file>
-        <file>qml/BugQuestionView.qml</file>
-        <file>qml/BugReportFlow.qml</file>
-        <file>qml/BugReportView.qml</file>
-        <file>qml/CategoryItem.qml</file>
         <file>qml/Configuration.qml</file>
         <file>qml/ConfigurationItem.qml</file>
         <file>qml/ContentWrapper.qml</file>
@@ -76,6 +71,7 @@
         <file>qml/icons/systray-mono-update.png</file>
         <file>qml/icons/systray-mono-warn.png</file>
         <file>qml/icons/systray.svg</file>
+        <file>qml/icons/ic-notification-bell.svg</file>
         <file alias="bridge.svg">../../../../dist/bridge.svg</file>
         <file alias="bridgeMacOS.svg">../../../../dist/bridgeMacOS.svg</file>
         <file>qml/KeychainSettings.qml</file>
@@ -83,12 +79,19 @@
         <file>qml/MainWindow.qml</file>
         <file>qml/NoAccountView.qml</file>
         <file>qml/NotificationDialog.qml</file>
+        <file>qml/UserNotificationDialog.qml</file>
         <file>qml/NotificationPopups.qml</file>
         <file>qml/Notifications/Notification.qml</file>
         <file>qml/Notifications/NotificationFilter.qml</file>
         <file>qml/Notifications/Notifications.qml</file>
         <file>qml/Notifications/qmldir</file>
         <file>qml/PortSettings.qml</file>
+        <file>qml/BugReport/BugCategoryView.qml</file>
+        <file>qml/BugReport/BugQuestionView.qml</file>
+        <file>qml/BugReport/BugReportFlow.qml</file>
+        <file>qml/BugReport/BugReportView.qml</file>
+        <file>qml/BugReport/CategoryItem.qml</file>
+        <file>qml/BugReport/QuestionItem.qml</file>
         <file>qml/Proton/Action.qml</file>
         <file>qml/Proton/ApplicationWindow.qml</file>
         <file>qml/Proton/Button.qml</file>
@@ -96,6 +99,7 @@
         <file>qml/Proton/ColorScheme.qml</file>
         <file>qml/Proton/ComboBox.qml</file>
         <file>qml/Proton/Dialog.qml</file>
+        <file>qml/Proton/InfoTooltip.qml</file>
         <file>qml/Proton/Label.qml</file>
         <file>qml/Proton/LinkLabel.qml</file>
         <file>qml/Proton/Menu.qml</file>
@@ -108,7 +112,6 @@
         <file>qml/Proton/TextArea.qml</file>
         <file>qml/Proton/TextField.qml</file>
         <file>qml/Proton/Toggle.qml</file>
-        <file>qml/QuestionItem.qml</file>
         <file>qml/Resources/bug_report_flow.json</file>
         <file>qml/Resources/Help/Template.html</file>
         <file>qml/Resources/Help/WhyBridge.html</file>
@@ -116,6 +119,7 @@
         <file>qml/Resources/Help/WhyProfileWarning.html</file>
         <file>qml/SettingsItem.qml</file>
         <file>qml/SettingsView.qml</file>
+        <file>qml/SetupWizard/ClientConfigCertInstall.qml</file>
         <file>qml/SetupWizard/ClientListItem.qml</file>
         <file>qml/SetupWizard/LeftPane.qml</file>
         <file>qml/SetupWizard/ClientConfigAppleMail.qml</file>
@@ -130,5 +134,6 @@
         <file>qml/ConnectionModeSettings.qml</file>
         <file>qml/SplashScreen.qml</file>
         <file>qml/Status.qml</file>
+        <file>qml/Proton/ContextMenu.qml</file>
     </qresource>
 </RCC>

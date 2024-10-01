@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -37,7 +37,7 @@ struct CommandLineOptions {
 };
 
 
-CommandLineOptions parseCommandLine(int argc, char *argv[]); ///< Parse the command-line arguments
+CommandLineOptions parseCommandLine(QStringList const &argv); ///< Parse the command-line arguments
 
 
 #endif //BRIDGE_GUI_COMMAND_LINE_H

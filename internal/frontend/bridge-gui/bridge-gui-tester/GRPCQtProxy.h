@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -36,7 +36,7 @@ public: // member functions.
     GRPCQtProxy &operator=(GRPCQtProxy const &) = delete; ///< Disabled assignment operator.
     GRPCQtProxy &operator=(GRPCQtProxy &&) = delete; ///< Disabled move assignment operator.
 
-    void connectSignals(); // connect the signals to the main window.
+    void connectSignals() const; // connect the signals to the main window.
     void sendDelayedEvent(bridgepp::SPStreamEvent const &event); ///< Sends a delayed stream event.
     void setIsAutostartOn(bool on); ///< Forwards a SetIsAutostartOn call via a Qt signal.
     void setIsBetaEnabled(bool enabled); ///< Forwards a SetIsBetaEnabled call via a Qt signal.
@@ -45,11 +45,12 @@ public: // member functions.
     void setColorSchemeName(QString const &name); ///< Forward a SetColorSchemeName call via a Qt Signal
     void reportBug(QString const &osType, QString const &osVersion, QString const &emailClient, QString const &address,
         QString const &description, bool includeLogs); ///< Forwards a ReportBug call via a Qt signal.
+    void requestKnowledgeBaseSuggestions(QString const &userInput); ///< Forwards a RequestKnowledgeBaseSuggestions call via a Qt signal.
     void installTLSCertificate(); ///< Forwards a InstallTLScertificate call via a Qt signal.
     void exportTLSCertificates(QString const &folderPath); //< Forward an 'ExportTLSCertificates' call via a Qt signal.
     void setIsStreaming(bool isStreaming); ///< Forward a isStreaming internal messages via a Qt signal.
     void setClientPlatform(QString const &clientPlatform); ///< Forward a setClientPlatform call via a Qt signal.
-    void setMailServerSettings(qint32 imapPort, qint32 smtpPort, bool useSSLForIMAP, bool userSSLForSMTP); ///< Forwards a setMailServerSettings' call via a Qt signal.
+    void setMailServerSettings(qint32 imapPort, qint32 smtpPort, bool useSSLForIMAP, bool useSSLForSMTP); ///< Forwards a setMailServerSettings' call via a Qt signal.
     void setIsDoHEnabled(bool enabled); ///< Forwards a setIsDoHEnabled call via a Qt signal.
     void setDiskCachePath(QString const &path); ///< Forwards a setDiskCachePath call via a Qt signal.
     void setIsAutomaticUpdateOn(bool on); ///< Forwards a SetIsAutomaticUpdateOn call via a Qt signal.
@@ -68,6 +69,7 @@ signals:
     void setColorSchemeNameReceived(QString const &name); ///< Forward a SetColorScheme call via a Qt Signal
     void reportBugReceived(QString const &osType, QString const &osVersion, QString const &emailClient, QString const &address,
         QString const &description, bool includeLogs); ///< Signal for the ReportBug gRPC call
+    void requestKnowledgeBaseSuggestionsReceived(QString const &userInput); ///< Signal for the RequestKnowledgeBaseSuggestions gRPC call.
     void installTLSCertificateReceived(); ///< Signal for the InstallTLSCertificate gRPC call.
     void exportTLSCertificatesReceived(QString const &folderPath); ///< Signal for the ExportTLSCertificates gRPC call.
     void setIsStreamingReceived(bool isStreaming); ///< Signal for the IsStreaming internal message.

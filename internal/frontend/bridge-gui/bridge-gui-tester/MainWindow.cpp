@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -63,7 +63,7 @@ MainWindow::MainWindow(QWidget *parent)
 //****************************************************************************************************************************************************
 /// \return A reference to the 'General' tab.
 //****************************************************************************************************************************************************
-SettingsTab &MainWindow::settingsTab() {
+SettingsTab &MainWindow::settingsTab() const {
     return *ui_.settingsTab;
 }
 
@@ -71,8 +71,24 @@ SettingsTab &MainWindow::settingsTab() {
 //****************************************************************************************************************************************************
 /// \return A reference to the users tab.
 //****************************************************************************************************************************************************
-UsersTab &MainWindow::usersTab() {
+UsersTab &MainWindow::usersTab() const {
     return *ui_.usersTab;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return A reference to the events tab.
+//****************************************************************************************************************************************************
+EventsTab& MainWindow::eventsTab() const {
+    return *ui_.eventsTab;
+}
+
+
+//****************************************************************************************************************************************************
+/// \return A reference to the knowledge base tab.
+//****************************************************************************************************************************************************
+KnowledgeBaseTab& MainWindow::knowledgeBaseTab() const {
+    return *ui_.knowledgeBaseTab;
 }
 
 
@@ -80,7 +96,7 @@ UsersTab &MainWindow::usersTab() {
 /// \param[in] level The log level.
 /// \param[in] message The log message
 //****************************************************************************************************************************************************
-void MainWindow::addLogEntry(bridgepp::Log::Level level, const QString &message) {
+void MainWindow::addLogEntry(bridgepp::Log::Level level, const QString &message) const {
     addEntryToLogEdit(level, message, *ui_.editLog);
 }
 
@@ -89,7 +105,7 @@ void MainWindow::addLogEntry(bridgepp::Log::Level level, const QString &message)
 /// \param[in] level The log level.
 /// \param[in] message The log message
 //****************************************************************************************************************************************************
-void MainWindow::addBridgeGUILogEntry(bridgepp::Log::Level level, const QString &message) {
+void MainWindow::addBridgeGUILogEntry(bridgepp::Log::Level level, const QString &message) const {
     addEntryToLogEdit(level, message, *ui_.editBridgeGUILog);
 }
 
@@ -97,8 +113,8 @@ void MainWindow::addBridgeGUILogEntry(bridgepp::Log::Level level, const QString 
 //****************************************************************************************************************************************************
 /// \param[in] event The event.
 //****************************************************************************************************************************************************
-void MainWindow::sendDelayedEvent(SPStreamEvent const &event) {
-    QTimer::singleShot(this->settingsTab().eventDelayMs(), [event] { app().grpc().sendEvent(event); });
+void MainWindow::sendDelayedEvent(SPStreamEvent const &event) const {
+    QTimer::singleShot(this->eventsTab().eventDelayMs(), [event] { app().grpc().sendEvent(event); });
 }
 
 

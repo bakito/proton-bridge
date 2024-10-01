@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -133,7 +133,7 @@ func (p *Part) ConvertMetaCharset() error {
 
 	// Override charset to UTF-8 in meta headers only if needed.
 	var metaModified = false
-	goquery.NewDocumentFromNode(doc).Find("meta").Each(func(n int, sel *goquery.Selection) {
+	goquery.NewDocumentFromNode(doc).Find("meta").Each(func(_ int, sel *goquery.Selection) {
 		if val, ok := sel.Attr("content"); ok {
 			t, params, err := pmmime.ParseMediaType(val)
 			if err != nil {

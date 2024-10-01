@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -21,6 +21,7 @@ import (
 	"context"
 
 	"github.com/ProtonMail/gluon/async"
+	"github.com/ProtonMail/proton-bridge/v3/internal/kb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -75,7 +76,8 @@ func (s *Service) RunEventStream(request *EventStreamRequest, server Bridge_RunE
 			}
 		case <-server.Context().Done():
 			s.log.Debug("Client closed the stream, exiting")
-			return s.quit()
+			s.quit()
+			return nil
 		}
 	}
 }
@@ -122,6 +124,7 @@ func (s *Service) StartEventTest() error {
 		NewReportBugSuccessEvent(),
 		NewReportBugErrorEvent(),
 		NewShowMainWindowEvent(),
+		NewRequestKnowledgeBaseSuggestionsEvent(kb.ArticleList{}),
 
 		// login
 		NewLoginError(LoginErrorType_FREE_USER, "error"),

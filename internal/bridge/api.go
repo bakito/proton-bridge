@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -40,7 +40,7 @@ func defaultAPIOptions(
 		proton.WithAppVersion(constants.AppVersion(version.Original())),
 		proton.WithCookieJar(cookieJar),
 		proton.WithTransport(transport),
-		proton.WithLogger(logrus.StandardLogger()),
+		proton.WithLogger(logrus.WithField("pkg", "gpa/client")),
 		proton.WithPanicHandler(panicHandler),
 	}
 }

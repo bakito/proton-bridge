@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -38,6 +38,8 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the network port range (\d+)-(\d+) is busy$`, s.networkPortRangeIsBusy)
 	ctx.Step(`^bridge IMAP port is (\d+)`, s.bridgeIMAPPortIs)
 	ctx.Step(`^bridge SMTP port is (\d+)`, s.bridgeSMTPPortIs)
+	ctx.Step(`^the message used "([^"]*)" key for sending$`, s.theMessageUsedKeyForSending)
+
 	// ==== SETUP ====
 	ctx.Step(`^there exists an account with username "([^"]*)" and password "([^"]*)"$`, s.thereExistsAnAccountWithUsernameAndPassword)
 	ctx.Step(`^there exists a disabled account with username "([^"]*)" and password "([^"]*)"$`, s.thereExistsAnAccountWithUsernameAndPasswordWithDisablePrimary)
@@ -76,6 +78,7 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the user reports a bug$`, s.theUserReportsABug)
 	ctx.Step(`^the user reports a bug with field "([^"]*)" set to "([^"]*)"$`, s.theUserReportsABugWithSingleHeaderChange)
 	ctx.Step(`^the user reports a bug with details:$`, s.theUserReportsABugWithDetails)
+	ctx.Step(`^the description "([^"]*)" provides the following KB suggestions:$`, s.theDescriptionInputProvidesKnowledgeBaseArticles)
 	ctx.Step(`^the user hides All Mail$`, s.theUserHidesAllMail)
 	ctx.Step(`^the user shows All Mail$`, s.theUserShowsAllMail)
 	ctx.Step(`^the user disables telemetry in bridge settings$`, s.theUserDisablesTelemetryInBridgeSettings)
@@ -100,6 +103,7 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 
 	// ==== USER ====
 	ctx.Step(`^the user logs in with username "([^"]*)" and password "([^"]*)"$`, s.userLogsInWithUsernameAndPassword)
+	ctx.Step(`^the user logs in with alias address "([^"]*)" and password "([^"]*)"$`, s.userLogsInWithAliasAddressAndPassword)
 	ctx.Step(`^user "([^"]*)" logs out$`, s.userLogsOut)
 	ctx.Step(`^user "([^"]*)" is deleted$`, s.userIsDeleted)
 	ctx.Step(`^the auth of user "([^"]*)" is revoked$`, s.theAuthOfUserIsRevoked)
@@ -212,4 +216,14 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the contact "([^"]*)" of user "([^"]*)" has encryption "([^"]*)"$`, s.contactOfUserHasEncryption)
 	ctx.Step(`^the contact "([^"]*)" of user "([^"]*)" has public key:$`, s.contactOfUserHasPubKey)
 	ctx.Step(`^the contact "([^"]*)" of user "([^"]*)" has public key from file "([^"]*)"$`, s.contactOfUserHasPubKeyFromFile)
+
+	// ==== OBSERVABILITY METRICS ====
+	ctx.Step(`^the user with username "([^"]*)" sends the following remote notification observability metric "([^"]*)"$`,
+		s.userRemoteNotificationMetricTest)
+	ctx.Step(`^the user with username "([^"]*)" sends all possible observability heartbeat metrics$`, s.userHeartbeatPermutationsObservability)
+	ctx.Step(`^the user with username "([^"]*)" sends all possible user distinction metrics$`, s.userDistinctionMetricsPermutationsObservability)
+	ctx.Step(`^the user with username "([^"]*)" sends all possible sync message event failure observability metrics$`, s.syncFailureMessageEventsObservability)
+	ctx.Step(`^the user with username "([^"]*)" sends all possible event loop message events observability metrics$`, s.eventLoopFailureMessageEventsObservability)
+	ctx.Step(`^the user with username "([^"]*)" sends all possible sync message building failure observability metrics$`, s.syncFailureMessageBuiltObservability)
+	ctx.Step(`^the user with username "([^"]*)" sends all possible sync message building success observability metrics$`, s.syncSuccessMessageBuiltObservability)
 }

@@ -58,6 +58,7 @@ service Bridge {
   rpc ReportBug(ReportBugRequest) returns (google.protobuf.Empty);
   rpc ForceLauncher(google.protobuf.StringValue) returns (google.protobuf.Empty);
   rpc SetMainExecutable(google.protobuf.StringValue) returns (google.protobuf.Empty);
+  rpc RequestKnowledgeBaseSuggestions(google.protobuf.StringValue) returns (google.protobuf.Empty);
 
   // login
   rpc Login(LoginRequest) returns (google.protobuf.Empty);
@@ -110,6 +111,9 @@ service Bridge {
   // Server -> Client event stream
   rpc RunEventStream(EventStreamRequest) returns (stream StreamEvent); // Keep streaming until StopEventStream is called.
   rpc StopEventStream(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+  // Repair
+  rpc TriggerRepair(google.protobuf.Empty) returns (google.protobuf.Empty);
 }
 
 //**********************************************************************************************************************
@@ -167,6 +171,7 @@ message ReportBugRequest {
 message LoginRequest {
   string username = 1;
   bytes password = 2;
+  optional bool useHvDetails = 3;
 }
 
 message LoginAbortRequest {
@@ -269,6 +274,10 @@ message AppEvent {
     CertificateInstallSuccessEvent certificateInstallSuccess = 9;
     CertificateInstallCanceledEvent certificateInstallCanceled = 10;
     CertificateInstallFailedEvent certificateInstallFailed = 11;
+    KnowledgeBaseSuggestionsEvent knowledgeBaseSuggestions = 12;
+    RepairStartedEvent repairStarted = 13;
+    AllUsersLoadedEvent allUsersLoaded = 14;
+    UserNotificationEvent userNotification = 15;
   }
 }
 
@@ -286,6 +295,17 @@ message ReportBugFallbackEvent {}
 message CertificateInstallSuccessEvent {}
 message CertificateInstallCanceledEvent {}
 message CertificateInstallFailedEvent {}
+message RepairStartedEvent {}
+message AllUsersLoadedEvent {}
+
+message KnowledgeBaseSuggestion {
+  string url = 1;
+  string title = 2;
+}
+
+message KnowledgeBaseSuggestionsEvent {
+  repeated KnowledgeBaseSuggestion suggestions = 1;
+}
 
 //**********************************************************
 // Login related events
@@ -297,6 +317,7 @@ message LoginEvent {
     LoginTwoPasswordsRequestedEvent twoPasswordRequested = 3;
     LoginFinishedEvent finished = 4;
     LoginFinishedEvent alreadyLoggedIn = 5;
+    LoginHvRequestedEvent hvRequested = 6;
   }
 }
 
@@ -308,6 +329,7 @@ enum LoginErrorType {
   TFA_ABORT = 4;
   TWO_PASSWORDS_ERROR = 5;
   TWO_PASSWORDS_ABORT = 6;
+  HV_ERROR = 7;
 }
 
 message LoginErrorEvent {
@@ -326,6 +348,10 @@ message LoginTwoPasswordsRequestedEvent {
 message LoginFinishedEvent {
   string userID = 1;
   bool wasSignedOut = 2;
+}
+
+message LoginHvRequestedEvent {
+  string hvUrl = 1;
 }
 
 //**********************************************************
@@ -478,6 +504,7 @@ message UserEvent {
   }
 }
 
+
 message ToggleSplitModeFinishedEvent {
   string userID = 1;
 }
@@ -518,6 +545,14 @@ message SyncProgressEvent {
   int64 elapsedMs = 3;
   int64 remainingMs = 4;
 }
+
+message UserNotificationEvent {
+  string title = 1;
+  string subtitle = 2;
+  string body = 3;
+  string userID = 4;
+}
+
 
 //**********************************************************
 // Generic errors

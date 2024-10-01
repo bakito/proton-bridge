@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -76,7 +76,7 @@ func init() {
 
 func TestBridge_ConnStatus(t *testing.T) {
 	withEnv(t, func(ctx context.Context, s *server.Server, netCtl *proton.NetCtl, locator bridge.Locator, vaultKey []byte) {
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			// Get a stream of connection status events.
 			eventCh, done := bridge.GetEvents(events.ConnStatusUp{}, events.ConnStatusDown{})
 			defer done()
@@ -125,7 +125,7 @@ func TestBridge_TLSIssue(t *testing.T) {
 
 func TestBridge_Focus(t *testing.T) {
 	withEnv(t, func(ctx context.Context, s *server.Server, netCtl *proton.NetCtl, locator bridge.Locator, vaultKey []byte) {
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			// Get a stream of TLS issue events.
 			raiseCh, done := bridge.GetEvents(events.Raise{})
 			defer done()
@@ -156,7 +156,7 @@ func TestBridge_UserAgent(t *testing.T) {
 			calls = append(calls, call)
 		})
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			// Set the platform to something other than the default.
 			bridge.SetCurrentPlatform("platform")
 
@@ -183,20 +183,11 @@ func TestBridge_UserAgent_Persistence(t *testing.T) {
 		_, _, err := s.CreateUser(otherUser, otherPassword)
 		require.NoError(t, err)
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
-			imapWaiter := waitForIMAPServerReady(b)
-			defer imapWaiter.Done()
-
-			smtpWaiter := waitForSMTPServerReady(b)
-			defer smtpWaiter.Done()
-
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			currentUserAgent := b.GetCurrentUserAgent()
 			require.Contains(t, currentUserAgent, useragent.DefaultUserAgent)
 
 			require.NoError(t, getErr(b.LoginFull(ctx, otherUser, otherPassword, nil, nil)))
-
-			imapWaiter.Wait()
-			smtpWaiter.Wait()
 
 			imapClient, err := eventuallyDial(fmt.Sprintf("%v:%v", constants.Host, b.GetIMAPPort()))
 			require.NoError(t, err)
@@ -220,7 +211,7 @@ func TestBridge_UserAgent_Persistence(t *testing.T) {
 			require.Contains(t, b.GetCurrentUserAgent(), "MyFancyClient/0.1.2")
 		})
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			currentUserAgent := bridge.GetCurrentUserAgent()
 			require.Contains(t, currentUserAgent, "MyFancyClient/0.1.2")
 		})
@@ -234,21 +225,12 @@ func TestBridge_UserAgentFromUnknownClient(t *testing.T) {
 		_, _, err := s.CreateUser(otherUser, otherPassword)
 		require.NoError(t, err)
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
-			imapWaiter := waitForIMAPServerReady(b)
-			defer imapWaiter.Done()
-
-			smtpWaiter := waitForSMTPServerReady(b)
-			defer smtpWaiter.Done()
-
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			currentUserAgent := b.GetCurrentUserAgent()
 			require.Contains(t, currentUserAgent, useragent.DefaultUserAgent)
 
 			userID, err := b.LoginFull(context.Background(), username, password, nil, nil)
 			require.NoError(t, err)
-
-			imapWaiter.Wait()
-			smtpWaiter.Wait()
 
 			imapClient, err := eventuallyDial(fmt.Sprintf("%v:%v", constants.Host, b.GetIMAPPort()))
 			require.NoError(t, err)
@@ -273,21 +255,12 @@ func TestBridge_UserAgentFromSMTPClient(t *testing.T) {
 		_, _, err := s.CreateUser(otherUser, otherPassword)
 		require.NoError(t, err)
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
-			imapWaiter := waitForIMAPServerReady(b)
-			defer imapWaiter.Done()
-
-			smtpWaiter := waitForSMTPServerReady(b)
-			defer smtpWaiter.Done()
-
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			currentUserAgent := b.GetCurrentUserAgent()
 			require.Contains(t, currentUserAgent, useragent.DefaultUserAgent)
 
 			userID, err := b.LoginFull(context.Background(), username, password, nil, nil)
 			require.NoError(t, err)
-
-			imapWaiter.Wait()
-			smtpWaiter.Wait()
 
 			client, err := smtp.Dial(net.JoinHostPort(constants.Host, fmt.Sprint(b.GetSMTPPort())))
 			require.NoError(t, err)
@@ -332,17 +305,8 @@ func TestBridge_UserAgentFromIMAPID(t *testing.T) {
 		_, _, err := s.CreateUser(otherUser, otherPassword)
 		require.NoError(t, err)
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
-			imapWaiter := waitForIMAPServerReady(b)
-			defer imapWaiter.Done()
-
-			smtpWaiter := waitForSMTPServerReady(b)
-			defer smtpWaiter.Done()
-
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			require.NoError(t, getErr(b.LoginFull(ctx, otherUser, otherPassword, nil, nil)))
-
-			imapWaiter.Wait()
-			smtpWaiter.Wait()
 
 			imapClient, err := eventuallyDial(fmt.Sprintf("%v:%v", constants.Host, b.GetIMAPPort()))
 			require.NoError(t, err)
@@ -401,13 +365,13 @@ func TestBridge_Cookies(t *testing.T) {
 		})
 
 		// Start bridge and add a user so that API assigns us a session ID via cookie.
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			_, err := bridge.LoginFull(context.Background(), username, password, nil, nil)
 			require.NoError(t, err)
 		})
 
 		// Start bridge again and check that it uses the same session ID.
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(_ *bridge.Bridge, _ *bridge.Mocks) {
 			// ...
 		})
 
@@ -520,7 +484,7 @@ func TestBridge_ManualUpdate(t *testing.T) {
 
 func TestBridge_ForceUpdate(t *testing.T) {
 	withEnv(t, func(ctx context.Context, s *server.Server, netCtl *proton.NetCtl, locator bridge.Locator, vaultKey []byte) {
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			// Get a stream of update events.
 			updateCh, done := bridge.GetEvents(events.UpdateForced{})
 			defer done()
@@ -543,7 +507,7 @@ func TestBridge_BadVaultKey(t *testing.T) {
 		var userID string
 
 		// Login a user.
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			newUserID, err := bridge.LoginFull(context.Background(), username, password, nil, nil)
 			require.NoError(t, err)
 
@@ -551,17 +515,17 @@ func TestBridge_BadVaultKey(t *testing.T) {
 		})
 
 		// Start bridge with the correct vault key -- it should load the users correctly.
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			require.ElementsMatch(t, []string{userID}, bridge.GetUserIDs())
 		})
 
 		// Start bridge with a bad vault key, the vault will be wiped and bridge will show no users.
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, []byte("bad"), func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, []byte("bad"), func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			require.Empty(t, bridge.GetUserIDs())
 		})
 
 		// Start bridge with a nil vault key, the vault will be wiped and bridge will show no users.
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, nil, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, nil, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			require.Empty(t, bridge.GetUserIDs())
 		})
 	})
@@ -571,7 +535,7 @@ func TestBridge_MissingGluonStore(t *testing.T) {
 	withEnv(t, func(ctx context.Context, s *server.Server, netCtl *proton.NetCtl, locator bridge.Locator, vaultKey []byte) {
 		var gluonDir string
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			_, err := bridge.LoginFull(context.Background(), username, password, nil, nil)
 			require.NoError(t, err)
 
@@ -586,7 +550,7 @@ func TestBridge_MissingGluonStore(t *testing.T) {
 		require.NoError(t, os.RemoveAll(gluonDir))
 
 		// Bridge starts but can't find the gluon store dir; there should be no error.
-		withBridgeWaitForServers(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridgeWaitForServers(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(_ *bridge.Bridge, _ *bridge.Mocks) {
 			// ...
 		})
 	})
@@ -596,7 +560,7 @@ func TestBridge_MissingGluonDatabase(t *testing.T) {
 	withEnv(t, func(ctx context.Context, s *server.Server, netCtl *proton.NetCtl, locator bridge.Locator, vaultKey []byte) {
 		var gluonDir string
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			_, err := bridge.LoginFull(context.Background(), username, password, nil, nil)
 			require.NoError(t, err)
 
@@ -609,7 +573,7 @@ func TestBridge_MissingGluonDatabase(t *testing.T) {
 		require.NoError(t, os.RemoveAll(gluonDir))
 
 		// Bridge starts but can't find the gluon database dir; there should be no error.
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(_ *bridge.Bridge, _ *bridge.Mocks) {
 			// ...
 		})
 	})
@@ -623,7 +587,7 @@ func TestBridge_AddressWithoutKeys(t *testing.T) {
 		)
 		defer m.Close()
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			// Watch for sync finished event.
 			syncCh, done := chToType[events.Event, events.SyncFinished](bridge.GetEvents(events.SyncFinished{}))
 			defer done()
@@ -699,7 +663,7 @@ func TestBridge_FactoryReset(t *testing.T) {
 
 func TestBridge_InitGluonDirectory(t *testing.T) {
 	withEnv(t, func(ctx context.Context, s *server.Server, netCtl *proton.NetCtl, locator bridge.Locator, vaultKey []byte) {
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			configDir, err := b.GetGluonDataDir()
 			require.NoError(t, err)
 
@@ -714,21 +678,12 @@ func TestBridge_InitGluonDirectory(t *testing.T) {
 
 func TestBridge_LoginFailed(t *testing.T) {
 	withEnv(t, func(ctx context.Context, s *server.Server, netCtl *proton.NetCtl, locator bridge.Locator, vaultKey []byte) {
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, mocks *bridge.Mocks) {
-			imapWaiter := waitForIMAPServerReady(bridge)
-			defer imapWaiter.Done()
-
-			smtpWaiter := waitForSMTPServerReady(bridge)
-			defer smtpWaiter.Done()
-
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(bridge *bridge.Bridge, _ *bridge.Mocks) {
 			failCh, done := chToType[events.Event, events.IMAPLoginFailed](bridge.GetEvents(events.IMAPLoginFailed{}))
 			defer done()
 
 			_, err := bridge.LoginFull(ctx, username, password, nil, nil)
 			require.NoError(t, err)
-
-			imapWaiter.Wait()
-			smtpWaiter.Wait()
 
 			imapClient, err := eventuallyDial(net.JoinHostPort(constants.Host, fmt.Sprint(bridge.GetIMAPPort())))
 			require.NoError(t, err)
@@ -751,17 +706,11 @@ func TestBridge_ChangeCacheDirectory(t *testing.T) {
 			createNumMessages(ctx, t, c, addrID, labelID, 10)
 		})
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			newCacheDir := t.TempDir()
 			currentCacheDir := b.GetGluonCacheDir()
 			configDir, err := b.GetGluonDataDir()
 			require.NoError(t, err)
-
-			imapWaiter := waitForIMAPServerReady(b)
-			defer imapWaiter.Done()
-
-			smtpWaiter := waitForSMTPServerReady(b)
-			defer smtpWaiter.Done()
 
 			// Login the user.
 			syncCh, done := chToType[events.Event, events.SyncFinished](b.GetEvents(events.SyncFinished{}))
@@ -796,9 +745,6 @@ func TestBridge_ChangeCacheDirectory(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, info.State == bridge.Connected)
 
-			imapWaiter.Wait()
-			smtpWaiter.Wait()
-
 			client, err := eventuallyDial(fmt.Sprintf("%v:%v", constants.Host, b.GetIMAPPort()))
 			require.NoError(t, err)
 			require.NoError(t, client.Login(info.Addresses[0], string(info.BridgePass)))
@@ -826,7 +772,7 @@ func TestBridge_ChangeAddressOrder(t *testing.T) {
 			createNumMessages(ctx, t, c, addrID, proton.InboxLabel, 10)
 		})
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			// Log the user in with its first address.
 			syncCh, done := chToType[events.Event, events.SyncFinished](b.GetEvents(events.SyncFinished{}))
 			defer done()
@@ -854,7 +800,7 @@ func TestBridge_ChangeAddressOrder(t *testing.T) {
 			require.NoError(t, c.OrderAddresses(ctx, proton.OrderAddressesReq{AddressIDs: []string{aliasID, addrID}}))
 		})
 
-		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, mocks *bridge.Mocks) {
+		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, vaultKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
 			// We should still see 10 messages in the inbox.
 			info, err := b.GetUserInfo(userID)
 			require.NoError(t, err)
@@ -1129,5 +1075,59 @@ func waitForIMAPServerStopped(b *bridge.Bridge) *eventWaiter {
 	return &eventWaiter{
 		evtCh:  evtCh,
 		cancel: cancel,
+	}
+}
+
+func TestBridge_GetUpdatedCachePath(t *testing.T) {
+	type TestData struct {
+		gluonDBPath    string
+		gluonCachePath string
+		shouldChange   bool
+	}
+
+	dataArr := []TestData{
+		{
+			gluonDBPath:    "/Users/test/",
+			gluonCachePath: "/Users/test/gluon",
+			shouldChange:   false,
+		}, {
+			gluonDBPath:    "/Users/test/",
+			gluonCachePath: "/Users/tester/gluon",
+			shouldChange:   true,
+		}, {
+			gluonDBPath:    "/Users/testing/",
+			gluonCachePath: "/Users/test/gluon",
+			shouldChange:   true,
+		},
+		{
+			gluonDBPath:    "/Users/testing/",
+			gluonCachePath: "/Users/test/gluon",
+			shouldChange:   true,
+		},
+		{
+			gluonDBPath:    "/Users/testing/",
+			gluonCachePath: "/Volumes/test/gluon",
+			shouldChange:   false,
+		},
+		{
+			gluonDBPath:    "/Volumes/test/",
+			gluonCachePath: "/Users/test/gluon",
+			shouldChange:   false,
+		},
+		{
+			gluonDBPath:    "/XXX/test/",
+			gluonCachePath: "/Users/test/gluon",
+			shouldChange:   false,
+		},
+		{
+			gluonDBPath:    "/XXX/test/",
+			gluonCachePath: "/YYY/test/gluon",
+			shouldChange:   false,
+		},
+	}
+
+	for _, el := range dataArr {
+		newCachePath := bridge.GetUpdatedCachePath(el.gluonDBPath, el.gluonCachePath)
+		require.Equal(t, el.shouldChange, newCachePath != "" && newCachePath != el.gluonCachePath)
 	}
 }

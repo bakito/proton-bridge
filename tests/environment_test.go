@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -59,11 +59,19 @@ func (s *scenario) itFailsWithError(wantErr string) error {
 
 func (s *scenario) internetIsTurnedOff() error {
 	s.t.netCtl.SetCanDial(false)
+	t, ok := (*s.t.rt).(*http.Transport)
+	if ok {
+		t.CloseIdleConnections()
+	}
 	return nil
 }
 
 func (s *scenario) internetIsTurnedOn() error {
 	s.t.netCtl.SetCanDial(true)
+	t, ok := (*s.t.rt).(*http.Transport)
+	if ok {
+		t.CloseIdleConnections()
+	}
 	return nil
 }
 
@@ -197,6 +205,33 @@ func (s *scenario) theBodyInTheResponseToIs(method, path string, value *godog.Do
 
 	if err := json.Unmarshal([]byte(value.Content), &want); err != nil {
 		return err
+	}
+
+	if !IsSub(body, want) {
+		return fmt.Errorf("have body %v, want %v", body, want)
+	}
+
+	return nil
+}
+
+func (s *scenario) theMessageUsedKeyForSending(address string) error {
+	addrID := s.t.getUserByAddress(address).getAddrID(address)
+
+	call, err := s.t.getLastCallExcludingHTTPOverride("POST", "/mail/v4/messages")
+	if err != nil {
+		return err
+	}
+
+	var body, want map[string]any
+
+	if err := json.Unmarshal(call.ResponseBody, &body); err != nil {
+		return err
+	}
+
+	want = map[string]any{
+		"Message": map[string]any{
+			"AddressID": addrID,
+		},
 	}
 
 	if !IsSub(body, want) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -34,6 +34,8 @@ import (
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/htmlindex"
 )
+
+var EmptyContentTypeErr = errors.New("empty content type")
 
 func init() {
 	rfc822.ParseMediaType = ParseMediaType
@@ -257,7 +259,7 @@ func DecodeCharset(original []byte, contentType string) ([]byte, error) {
 // ParseMediaType from MIME doesn't support RFC2231 for non asci / utf8 encodings so we have to pre-parse it.
 func ParseMediaType(v string) (string, map[string]string, error) {
 	if v == "" {
-		return "", nil, errors.New("empty media type")
+		return "", nil, EmptyContentTypeErr
 	}
 	decoded, err := DecodeHeader(v)
 	if err != nil {

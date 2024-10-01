@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/ProtonMail/gluon/async"
@@ -43,6 +44,7 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/restarter"
+	"github.com/elastic/go-sysinfo"
 	"github.com/pkg/profile"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
@@ -77,17 +79,33 @@ const (
 
 // Hidden flags.
 const (
-	flagLauncher         = "launcher"
-	flagNoWindow         = "no-window"
-	flagParentPID        = "parent-pid"
-	flagSoftwareRenderer = "software-renderer"
-	flagSessionID        = "session-id"
+	flagLauncher            = "launcher"
+	flagNoWindow            = "no-window"
+	flagParentPID           = "parent-pid"
+	flagSoftwareRenderer    = "software-renderer"
+	flagEnableKeychainTest  = "enable-keychain-test"
+	flagDisableKeychainTest = "disable-keychain-test"
+	FlagSessionID           = "session-id"
 )
 
 const (
 	appUsage     = "Proton Mail IMAP and SMTP Bridge"
 	appShortName = "bridge"
 )
+
+var cliFlagEnableKeychainTest = &cli.BoolFlag{ //nolint:gochecknoglobals
+	Name:   flagEnableKeychainTest,
+	Usage:  "Enable the keychain test",
+	Hidden: true,
+	Value:  false,
+} //nolint:gochecknoglobals
+
+var cliFlagDisableKeychainTest = &cli.BoolFlag{ //nolint:gochecknoglobals
+	Name:   flagDisableKeychainTest,
+	Usage:  "Disable the keychain test",
+	Hidden: true,
+	Value:  false,
+}
 
 func New() *cli.App {
 	app := cli.NewApp()
@@ -163,9 +181,12 @@ func New() *cli.App {
 			Value:  false,
 		},
 		&cli.StringFlag{
-			Name:   flagSessionID,
+			Name:   FlagSessionID,
 			Hidden: true,
 		},
+		// the two flags below were introduced by BRIDGE-116
+		cliFlagEnableKeychainTest,
+		cliFlagDisableKeychainTest,
 	}
 
 	app.Action = run
@@ -236,7 +257,8 @@ func run(c *cli.Context) error {
 
 						return withSingleInstance(settings, locations.GetLockFile(), version, func() error {
 							// Look for available keychains
-							return WithKeychainList(func(keychains *keychain.List) error {
+							skipKeychainTest := checkSkipKeychainTest(c, settings)
+							return WithKeychainList(crashHandler, skipKeychainTest, func(keychains *keychain.List) error {
 								// Unlock the encrypted vault.
 								return WithVault(locations, keychains, crashHandler, func(v *vault.Vault, insecure, corrupt bool) error {
 									if !v.Migrated() {
@@ -344,7 +366,7 @@ func withLogging(c *cli.Context, crashHandler *crash.Handler, locations *locatio
 	logrus.WithField("path", logsPath).Debug("Received logs path")
 
 	// Initialize logging.
-	sessionID := logging.NewSessionIDFromString(c.String(flagSessionID))
+	sessionID := logging.NewSessionIDFromString(c.String(FlagSessionID))
 	var closer io.Closer
 	if closer, err = logging.Init(
 		logsPath,
@@ -370,6 +392,24 @@ func withLogging(c *cli.Context, crashHandler *crash.Handler, locations *locatio
 		WithField("args", os.Args).
 		WithField("SentryID", sentry.GetProtectedHostname()).
 		Info("Run app")
+
+	now := time.Now()
+	logrus.
+		WithField("timeZone", now.Format("MST")).
+		WithField("offset", now.Format("-07:00:00")).
+		Info("Time zone info")
+
+	host, err := sysinfo.Host()
+	if err != nil {
+		logrus.WithError(err).Error("Could not retrieve operating system info")
+	} else {
+		osInfo := host.Info().OS
+		logrus.
+			WithField("name", osInfo.Name).
+			WithField("version", osInfo.Version).
+			WithField("build", osInfo.Build).
+			Info("Operating system info")
+	}
 
 	return fn(closer)
 }
@@ -482,10 +522,11 @@ func withCookieJar(vault *vault.Vault, fn func(http.CookieJar) error) error {
 }
 
 // WithKeychainList init the list of usable keychains.
-func WithKeychainList(fn func(*keychain.List) error) error {
+func WithKeychainList(panicHandler async.PanicHandler, skipKeychainTest bool, fn func(*keychain.List) error) error {
 	logrus.Debug("Creating keychain list")
 	defer logrus.Debug("Keychain list stop")
-	return fn(keychain.NewList())
+	defer async.HandlePanic(panicHandler)
+	return fn(keychain.NewList(skipKeychainTest))
 }
 
 func setDeviceCookies(jar *cookies.Jar) error {
@@ -504,4 +545,36 @@ func setDeviceCookies(jar *cookies.Jar) error {
 	}
 
 	return nil
+}
+
+func checkSkipKeychainTest(c *cli.Context, settingsDir string) bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+
+	enable := c.Bool(flagEnableKeychainTest)
+	disable := c.Bool(flagDisableKeychainTest)
+
+	skip, err := vault.GetShouldSkipKeychainTest(settingsDir)
+	if err != nil {
+		logrus.WithError(err).Error("Could not load keychain settings.")
+	}
+
+	if (!enable) && (!disable) {
+		return skip
+	}
+
+	// if both switches are passed, 'enable' has priority
+	if disable {
+		skip = true
+	}
+	if enable {
+		skip = false
+	}
+
+	if err := vault.SetShouldSkipKeychainTest(settingsDir, skip); err != nil {
+		logrus.WithError(err).Error("Could not save keychain settings.")
+	}
+
+	return skip
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -22,11 +22,11 @@ import (
 	"fmt"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ProtonMail/proton-bridge/v3/internal/kb"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/userevents"
 	"github.com/ProtonMail/proton-bridge/v3/internal/updater"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
-	"github.com/sirupsen/logrus"
 )
 
 func (bridge *Bridge) GetKeychainApp() (string, error) {
@@ -133,7 +133,7 @@ func (bridge *Bridge) SetGluonDir(ctx context.Context, newGluonDir string) error
 	bridge.usersLock.RLock()
 
 	defer func() {
-		logrus.Info("Restarting user event loops")
+		logPkg.Info("Restarting user event loops")
 		for _, u := range bridge.users {
 			u.ResumeEventLoop()
 		}
@@ -148,20 +148,20 @@ func (bridge *Bridge) SetGluonDir(ctx context.Context, newGluonDir string) error
 
 	waiters := make([]waiter, 0, len(bridge.users))
 
-	logrus.Info("Pausing user event loops for gluon dir change")
+	logPkg.Info("Pausing user event loops for gluon dir change")
 	for id, u := range bridge.users {
 		waiters = append(waiters, waiter{w: u.PauseEventLoopWithWaiter(), id: id})
 	}
 
-	logrus.Info("Waiting on user event loop completion")
+	logPkg.Info("Waiting on user event loop completion")
 	for _, waiter := range waiters {
 		if err := waiter.w.WaitPollFinished(ctx); err != nil {
-			logrus.WithError(err).Errorf("Failed to wait on event loop pause for user %v", waiter.id)
+			logPkg.WithError(err).Errorf("Failed to wait on event loop pause for user %v", waiter.id)
 			return fmt.Errorf("failed on event loop pause: %w", err)
 		}
 	}
 
-	logrus.Info("Changing gluon directory")
+	logPkg.Info("Changing gluon directory")
 	return bridge.serverManager.SetGluonDir(ctx, newGluonDir)
 }
 
@@ -310,6 +310,10 @@ func (bridge *Bridge) SetColorScheme(colorScheme string) error {
 	return bridge.vault.SetColorScheme(colorScheme)
 }
 
+func (bridge *Bridge) GetKnowledgeBaseSuggestions(userInput string) (kb.ArticleList, error) {
+	return kb.GetSuggestions(userInput)
+}
+
 // FactoryReset deletes all users, wipes the vault, and deletes all files.
 // Note: it does not clear the keychain. The only entry in the keychain is the vault password,
 // which we need at next startup to decrypt the vault.
@@ -325,13 +329,13 @@ func (bridge *Bridge) FactoryReset(ctx context.Context) {
 	// Wipe the vault.
 	gluonCacheDir, err := bridge.locator.ProvideGluonCachePath()
 	if err != nil {
-		logrus.WithError(err).Error("Failed to provide gluon dir")
+		logPkg.WithError(err).Error("Failed to provide gluon dir")
 	} else if err := bridge.vault.Reset(gluonCacheDir); err != nil {
-		logrus.WithError(err).Error("Failed to reset vault")
+		logPkg.WithError(err).Error("Failed to reset vault")
 	}
 
 	// Lastly, delete all files except the vault.
 	if err := bridge.locator.Clear(bridge.vault.Path()); err != nil {
-		logrus.WithError(err).Error("Failed to clear data paths")
+		logPkg.WithError(err).Error("Failed to clear data paths")
 	}
 }

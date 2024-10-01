@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -30,6 +30,8 @@ import (
 )
 
 func (s *Service) IsTLSCertificateInstalled(context.Context, *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Info("IsTLSCertificateInstalled")
 
 	cert, _ := s.bridge.GetBridgeTLSCert()

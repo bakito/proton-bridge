@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -16,6 +16,12 @@
 // along with Proton Mail Bridge. If not, see <https://www.gnu.org/licenses/>.
 
 package grpc
+
+import (
+	"github.com/ProtonMail/proton-bridge/v3/internal/events"
+	"github.com/ProtonMail/proton-bridge/v3/internal/kb"
+	"github.com/bradenaw/juniper/xslices"
+)
 
 func NewInternetStatusEvent(connected bool) *StreamEvent {
 	return appEvent(&AppEvent{Event: &AppEvent_InternetStatus{InternetStatus: &InternetStatusEvent{Connected: connected}}})
@@ -61,6 +67,20 @@ func NewShowMainWindowEvent() *StreamEvent {
 	return appEvent(&AppEvent{Event: &AppEvent_ShowMainWindow{ShowMainWindow: &ShowMainWindowEvent{}}})
 }
 
+func NewRequestKnowledgeBaseSuggestionsEvent(suggestions kb.ArticleList) *StreamEvent {
+	s := xslices.Map(
+		suggestions,
+		func(article *kb.Article) *KnowledgeBaseSuggestion {
+			return &KnowledgeBaseSuggestion{Url: article.URL, Title: article.Title}
+		},
+	)
+	return appEvent(&AppEvent{Event: &AppEvent_KnowledgeBaseSuggestions{
+		KnowledgeBaseSuggestions: &KnowledgeBaseSuggestionsEvent{
+			Suggestions: s,
+		},
+	}})
+}
+
 func NewLoginError(err LoginErrorType, message string) *StreamEvent {
 	return loginEvent(&LoginEvent{Event: &LoginEvent_Error{Error: &LoginErrorEvent{Type: err, Message: message}}})
 }
@@ -79,6 +99,10 @@ func NewLoginFinishedEvent(userID string, wasSignedOut bool) *StreamEvent {
 
 func NewLoginAlreadyLoggedInEvent(userID string) *StreamEvent {
 	return loginEvent(&LoginEvent{Event: &LoginEvent_AlreadyLoggedIn{AlreadyLoggedIn: &LoginFinishedEvent{UserID: userID}}})
+}
+
+func NewLoginHvRequestedEvent(hvChallengeURL string) *StreamEvent {
+	return loginEvent(&LoginEvent{Event: &LoginEvent_HvRequested{HvRequested: &LoginHvRequestedEvent{HvUrl: hvChallengeURL}}})
 }
 
 func NewUpdateErrorEvent(errorType UpdateErrorType) *StreamEvent {
@@ -216,6 +240,24 @@ func NewSyncProgressEvent(userID string, progress float64, elapsedMs, remainingM
 
 func NewGenericErrorEvent(errorCode ErrorCode) *StreamEvent {
 	return genericErrorEvent(&GenericErrorEvent{Code: errorCode})
+}
+
+func NewRepairStartedEvent() *StreamEvent {
+	return appEvent(&AppEvent{Event: &AppEvent_RepairStarted{RepairStarted: &RepairStartedEvent{}}})
+}
+
+func NewAllUsersLoadedEvent() *StreamEvent {
+	return appEvent(&AppEvent{Event: &AppEvent_AllUsersLoaded{AllUsersLoaded: &AllUsersLoadedEvent{}}})
+}
+
+func NewUserNotificationEvent(event events.UserNotification) *StreamEvent {
+	return appEvent(&AppEvent{Event: &AppEvent_UserNotification{
+		UserNotification: &UserNotificationEvent{
+			UserID:   event.UserID,
+			Title:    event.Title,
+			Subtitle: event.Subtitle,
+			Body:     event.Body,
+		}}})
 }
 
 // Event category factory functions.

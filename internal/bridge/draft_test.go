@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -64,9 +64,6 @@ func TestBridge_HandleDraftsSendFromOtherClient(t *testing.T) {
 
 		// The initial user should be fully synced.
 		withBridge(ctx, t, s.GetHostURL(), netCtl, locator, storeKey, func(b *bridge.Bridge, _ *bridge.Mocks) {
-			waiter := waitForIMAPServerReady(b)
-			defer waiter.Done()
-
 			syncCh, done := chToType[events.Event, events.SyncFinished](b.GetEvents(events.SyncFinished{}))
 			defer done()
 
@@ -74,7 +71,6 @@ func TestBridge_HandleDraftsSendFromOtherClient(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, userID, (<-syncCh).UserID)
-			waiter.Wait()
 
 			info, err := b.GetUserInfo(userID)
 			require.NoError(t, err)

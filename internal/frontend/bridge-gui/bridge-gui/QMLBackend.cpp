@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -299,6 +299,16 @@ void QMLBackend::openExternalLink(QString const &url) {
         QString const u = url.isEmpty() ? bridgeKBUrl : url;
         QDesktopServices::openUrl(u);
         emit notifyExternalLinkClicked(u);
+    )
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] categoryID The ID of the bug report category.
+//****************************************************************************************************************************************************
+void QMLBackend::requestKnowledgeBaseSuggestions(qint8 categoryID) const {
+    HANDLE_EXCEPTION(
+        app().grpc().requestKnowledgeBaseSuggestions(reportFlow_.collectUserInput(categoryID));
     )
 }
 
@@ -799,6 +809,18 @@ void QMLBackend::login(QString const &username, QString const &password) const {
         app().grpc().login(username, password);
     )
 }
+
+void QMLBackend::loginHv(QString const &username, QString const &password) const {
+    HANDLE_EXCEPTION(
+            if (username.compare("coco@bandicoot", Qt::CaseInsensitive) == 0) {
+                throw Exception("User requested bridge-gui to crash by trying to log as coco@bandicoot",
+                                "This error exists for test purposes and should be ignored.", __func__, tailOfLatestBridgeLog(app().sessionID()));
+            }
+            app().grpc().loginHv(username, password);
+    )
+}
+
+
 
 
 //****************************************************************************************************************************************************
@@ -1305,6 +1327,10 @@ void QMLBackend::connectGrpcEvents() {
     connect(client, &GRPCClient::certificateInstallCanceled, this, &QMLBackend::certificateInstallCanceled);
     connect(client, &GRPCClient::certificateInstallFailed, this, &QMLBackend::certificateInstallFailed);
     connect(client, &GRPCClient::showMainWindow, [&]() { this->showMainWindow("gRPC showMainWindow event"); });
+    connect(client, &GRPCClient::knowledgeBasSuggestionsReceived, this, &QMLBackend::receivedKnowledgeBaseSuggestions);
+    connect(client, &GRPCClient::repairStarted, this, &QMLBackend::repairStarted);
+    connect(client, &GRPCClient::allUsersLoaded, this, &QMLBackend::allUsersLoaded);
+    connect(client, &GRPCClient::userNotificationReceived, this, &QMLBackend::processUserNotification);
 
     // cache events
     connect(client, &GRPCClient::cantMoveDiskCache, this, &QMLBackend::cantMoveDiskCache);
@@ -1323,6 +1349,8 @@ void QMLBackend::connectGrpcEvents() {
     connect(client, &GRPCClient::login2PasswordErrorAbort, this, &QMLBackend::login2PasswordErrorAbort);
     connect(client, &GRPCClient::loginFinished, this, &QMLBackend::onLoginFinished);
     connect(client, &GRPCClient::loginAlreadyLoggedIn, this, &QMLBackend::onLoginAlreadyLoggedIn);
+    connect(client, &GRPCClient::loginHvRequested, this, &QMLBackend::loginHvRequested);
+    connect(client, &GRPCClient::loginHvError, this, &QMLBackend::loginHvError);
 
     // update events
     connect(client, &GRPCClient::updateManualError, this, &QMLBackend::updateManualError);
@@ -1385,3 +1413,31 @@ void QMLBackend::displayBadEventDialog(QString const &userID) {
         emit showMainWindow();
     )
 }
+
+void QMLBackend::triggerRepair() const {
+    HANDLE_EXCEPTION(
+            app().grpc().triggerRepair();
+    )
+}
+
+//****************************************************************************************************************************************************
+/// \param[in] notification The user notification received from the event loop.
+//****************************************************************************************************************************************************
+void QMLBackend::processUserNotification(bridgepp::UserNotification const& notification) {
+    this->userNotificationStack_.push(notification);
+    trayIcon_->showUserNotification(notification.title, notification.subtitle);
+    emit receivedUserNotification(notification);
+}
+
+void QMLBackend::userNotificationDismissed() {
+    if (!this->userNotificationStack_.size()) return;
+
+    // Remove the user notification from the top of the queue as it has been dismissed.
+    this->userNotificationStack_.pop();
+    if (!this->userNotificationStack_.size()) return;
+
+    // Display the user notification that is on top of the queue, if there is one.
+    auto notification = this->userNotificationStack_.top();
+    emit receivedUserNotification(notification);
+}
+

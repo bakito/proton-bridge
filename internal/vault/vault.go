@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -240,6 +240,10 @@ func (vault *Vault) GetOrAddUser(userID, username, primaryEmail, authUID, authRe
 				return nil, false, err
 			}
 
+			if err := user.updateUsernameUnsafe(username); err != nil {
+				return nil, false, err
+			}
+
 			return user, false, nil
 		}
 	}
@@ -437,6 +441,22 @@ func (vault *Vault) getUser(userID string) UserData {
 	vault.lock.RLock()
 	defer vault.lock.RUnlock()
 
+	users := vault.getUnsafe().Users
+
+	idx := xslices.IndexFunc(users, func(user UserData) bool {
+		return user.UserID == userID
+	})
+
+	if idx < 0 {
+		panic("Unknown user")
+	}
+
+	return users[idx]
+}
+
+// getUserUnsafe - fetches the relevant UserData.
+// Should only be called from contexts in which the vault mutex has been read locked.
+func (vault *Vault) getUserUnsafe(userID string) UserData {
 	users := vault.getUnsafe().Users
 
 	idx := xslices.IndexFunc(users, func(user UserData) bool {

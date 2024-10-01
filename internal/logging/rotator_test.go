@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -172,7 +172,7 @@ func benchRotate(b *testing.B, logSize int64, getFile func(index int) (io.WriteC
 }
 
 func getTestFile(b *testing.B, dir string, length int) func(int) (io.WriteCloser, error) {
-	return func(index int) (io.WriteCloser, error) {
+	return func(_ int) (io.WriteCloser, error) {
 		b.StopTimer()
 		defer b.StartTimer()
 

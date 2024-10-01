@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -22,6 +22,7 @@
 
 #include "bridge.grpc.pb.h"
 #include "GRPCUtils.h"
+#include <bridgepp/GRPC/GRPCClient.h>
 
 
 namespace bridgepp {
@@ -39,6 +40,7 @@ SPStreamEvent newCertificateInstallSuccessEvent(); ///< Create a new Certificate
 SPStreamEvent newCertificateInstallCanceledEvent(); ///< Create a new CertificateInstallCanceledEvent event.
 SPStreamEvent newCertificateInstallFailedEvent(); ///< Create anew CertificateInstallFailedEvent event.
 SPStreamEvent newShowMainWindowEvent(); ///< Create a new ShowMainWindowEvent event.
+SPStreamEvent newKnowledgeBaseSuggestionsEvent(QList<KnowledgeBaseSuggestion> const& suggestions); ///< Create a new KnowledgeBaseSuggestions event.
 
 // Login events
 SPStreamEvent newLoginError(grpc::LoginErrorType error, QString const &message); ///< Create a new LoginError event.
@@ -46,6 +48,7 @@ SPStreamEvent newLoginTfaRequestedEvent(QString const &username); ///< Create a 
 SPStreamEvent newLoginTwoPasswordsRequestedEvent(QString const &username); ///< Create a new LoginTwoPasswordsRequestedEvent event.
 SPStreamEvent newLoginFinishedEvent(QString const &userID, bool wasSignedOut); ///< Create a new LoginFinishedEvent event.
 SPStreamEvent newLoginAlreadyLoggedInEvent(QString const &userID); ///< Create a new LoginAlreadyLoggedInEvent event.
+SPStreamEvent newLoginHvRequestedEvent(); ///< Create a new LoginHvRequestedEvent
 
 // Update related events
 SPStreamEvent newUpdateErrorEvent(grpc::UpdateErrorType errorType); ///< Create a new UpdateErrorEvent event.
@@ -90,6 +93,9 @@ SPStreamEvent newSyncProgressEvent(QString const &userID, double progress, qint6
 
 // Generic error event
 SPStreamEvent newGenericErrorEvent(grpc::ErrorCode errorCode); ///< Create a new GenericErrrorEvent event.
+
+// User notification event
+SPStreamEvent newUserNotificationEvent(QString const &userID, QString const title, QString const subtitle, QString const body);
 
 } // namespace bridgepp
 

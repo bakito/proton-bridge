@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -28,6 +28,7 @@
 #include <bridgepp/GRPC/GRPCClient.h>
 #include <bridgepp/GRPC/GRPCUtils.h>
 #include <bridgepp/Worker/Overseer.h>
+#include <stack>
 
 
 //****************************************************************************************************************************************************
@@ -66,6 +67,7 @@ public: // member functions.
     Q_INVOKABLE void clearAnswers(); ///< Clear all collected answers.
     Q_INVOKABLE bool isTLSCertificateInstalled(); ///< Check if the bridge certificate is installed in the OS keychain.
     Q_INVOKABLE void openExternalLink(QString const & url = QString()); ///< Open a knowledge base article.
+    Q_INVOKABLE void requestKnowledgeBaseSuggestions(qint8 categoryID) const; ///< Request knowledgebase article suggestions.
 
 public: // Qt/QML properties. Note that the NOTIFY-er signal is required even for read-only properties (QML warning otherwise)
     Q_PROPERTY(bool showOnStartup READ showOnStartup NOTIFY showOnStartupChanged)
@@ -173,6 +175,8 @@ signals: // Signal used by the Qt property system. Many of them are unused but r
     void isAutostartOnChanged(bool value); ///<Signal for the change of the 'isAutostartOn' property.
     void usersChanged(UserList *users); ///<Signal for the change of the 'users' property.
     void dockIconVisibleChanged(bool value); ///<Signal for the change of the 'dockIconVisible' property.
+    void receivedUserNotification(bridgepp::UserNotification const& notification); ///< Signal to display the userNotification modal
+
 
 public slots: // slot for signals received from QML -> To be forwarded to Bridge via RPC Client calls.
     void toggleAutostart(bool active); ///< Slot for the autostart toggle.
@@ -182,6 +186,7 @@ public slots: // slot for signals received from QML -> To be forwarded to Bridge
     void changeColorScheme(QString const &scheme); ///< Slot for the change of the theme.
     void setDiskCachePath(QUrl const &path) const; ///< Slot for the change of the disk cache path.
     void login(QString const &username, QString const &password) const; ///< Slot for the login button (initial login).
+    void loginHv(QString const &username, QString const &password) const; ///< Slot for the login button (after HV challenge completed).
     void login2FA(QString const &username, QString const &code) const; ///< Slot for the login button (2FA login).
     void login2Password(QString const &username, QString const &password) const; ///< Slot for the login button (mailbox password login).
     void loginAbort(QString const &username) const; ///< Slot for the login abort procedure.
@@ -206,6 +211,8 @@ public slots: // slot for signals received from QML -> To be forwarded to Bridge
     void notifyReportBugClicked() const; ///< Slot for the ReportBugClicked gRPC event.
     void notifyAutoconfigClicked(QString const &client) const; ///< Slot for gAutoconfigClicked gRPC event.
     void notifyExternalLinkClicked(QString const &article) const; ///< Slot for KBArticleClicked gRPC event.
+    void triggerRepair() const; ///< Slot for the triggering of the bridge repair function i.e. 'resync'.
+    void userNotificationDismissed(); ///< Slot to pop the notification from the stack and display the rest.
 
 public slots: // slots for functions that need to be processed locally.
     void setNormalTrayIcon(); ///< Set the tray icon to normal.
@@ -221,6 +228,7 @@ public slots: // slot for signals received from gRPC that need transformation in
     void onLoginAlreadyLoggedIn(QString const &userID); ///< Slot for the LoginAlreadyLoggedIn gRPC event.
     void onUserBadEvent(QString const& userID, QString const& errorMessage); ///< Slot for the userBadEvent gRPC event.
     void onIMAPLoginFailed(QString const& username); ///< Slot the the imapLoginFailed event.
+    void processUserNotification(bridgepp::UserNotification const& notification); ///< Slot for the userNotificationReceived gRCP event.
 
 signals: // Signals received from the Go backend, to be forwarded to QML
     void toggleAutostartFinished(); ///< Signal for the 'toggleAutostartFinished' gRPC stream event.
@@ -237,6 +245,8 @@ signals: // Signals received from the Go backend, to be forwarded to QML
     void login2PasswordErrorAbort(QString const &errorMsg); ///< Signal for the 'login2PasswordErrorAbort' gRPC stream event.
     void loginFinished(int index, bool wasSignedOut); ///< Signal for the 'loginFinished' gRPC stream event.
     void loginAlreadyLoggedIn(int index); ///< Signal for the 'loginAlreadyLoggedIn' gRPC stream event.
+    void loginHvRequested(QString const &hvUrl); ///< Signal for the 'loginHvRequested' gRPC stream event.
+    void loginHvError(QString const &errorMsg); ///< Signal for the 'loginHvError' gRPC stream event.
     void updateManualReady(QString const &version); ///< Signal for the 'updateManualReady' gRPC stream event.
     void updateManualRestartNeeded(); ///< Signal for the 'updateManualRestartNeeded' gRPC stream event.
     void updateManualError(); ///< Signal for the 'updateManualError' gRPC stream event.
@@ -278,6 +288,9 @@ signals: // Signals received from the Go backend, to be forwarded to QML
     void selectUser(QString const& userID, bool forceShowWindow); ///< Signal emitted in order to selected a user with a given ID in the list.
     void genericError(QString const &title, QString const &description); ///< Signal for the 'genericError' gRPC stream event.
     void imapLoginWhileSignedOut(QString const& username); ///< Signal for the notification of IMAP login attempt on a signed out account.
+    void receivedKnowledgeBaseSuggestions(QList<bridgepp::KnowledgeBaseSuggestion> const& suggestions); ///< Signal for the reception of knowledge base article suggestions.
+    void repairStarted(); ///< Signal for the 'repairStarted' gRPC stream event.
+    void allUsersLoaded(); ///< Signal for the 'allUsersLoaded' gRPC stream event
 
     // This signal is emitted when an exception is intercepted is calls triggered by QML. QML engine would intercept the exception otherwise.
     void fatalError(bridgepp::Exception const& e) const; ///< Signal emitted when an fatal error occurs.
@@ -302,6 +315,7 @@ private: // data members
     QList<QString> badEventDisplayQueue_; ///< THe queue for displaying 'bad event feedback request dialog'.
     std::unique_ptr<TrayIcon> trayIcon_; ///< The tray icon for the application.
     bridgepp::BugReportFlow reportFlow_;  ///< The bug report flow.
+    std::stack<bridgepp::UserNotification> userNotificationStack_; ///< The stack which holds all of the active notifications that the user needs to acknowledge.
     friend class AppController;
 };
 

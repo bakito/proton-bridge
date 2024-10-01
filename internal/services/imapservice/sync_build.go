@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -46,6 +46,7 @@ func defaultMessageJobOpts() message.JobOptions {
 		AddExternalID:          true, // Whether to include ExternalID as X-Pm-External-Id.
 		AddMessageDate:         true, // Whether to include message time as X-Pm-Date.
 		AddMessageIDReference:  true, // Whether to include the MessageID in References.
+		SanitizeMBOXHeaderLine: true, // Whether to ignore header line representing MBOX delimiter
 	}
 }
 

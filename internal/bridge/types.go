@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -33,6 +33,8 @@ type Locator interface {
 	GetDependencyLicensesLink() string
 	Clear(...string) error
 	ProvideIMAPSyncConfigPath() (string, error)
+	ProvideUnleashCachePath() (string, error)
+	ProvideNotificationsCachePath() (string, error)
 }
 
 type ProxyController interface {

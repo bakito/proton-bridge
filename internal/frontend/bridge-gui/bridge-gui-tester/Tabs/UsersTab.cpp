@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -57,6 +57,7 @@ UsersTab::UsersTab(QWidget *parent)
     connect(ui_.checkUsernamePasswordError, &QCheckBox::toggled, this, &UsersTab::updateGUIState);
     connect(ui_.checkSync, &QCheckBox::toggled, this, &UsersTab::onCheckSyncToggled);
     connect(ui_.sliderSync, &QSlider::valueChanged, this, &UsersTab::onSliderSyncValueChanged);
+    connect(ui_.sendNotificationButton, &QPushButton::clicked, this, &UsersTab::onSendUserNotification);
 
     users_.append(defaultUser());
 
@@ -85,7 +86,7 @@ void UsersTab::onAddUserButton() {
 //
 //****************************************************************************************************************************************************
 void UsersTab::onEditUserButton() {
-    int index = selectedIndex();
+    const int index = selectedIndex();
     if ((index < 0) || (index >= users_.userCount())) {
         return;
     }
@@ -110,7 +111,7 @@ void UsersTab::onEditUserButton() {
 //
 //****************************************************************************************************************************************************
 void UsersTab::onRemoveUserButton() {
-    int index = selectedIndex();
+    const int index = selectedIndex();
     if ((index < 0) || (index >= users_.userCount())) {
         return;
     }
@@ -127,7 +128,7 @@ void UsersTab::onRemoveUserButton() {
 //****************************************************************************************************************************************************
 //
 //****************************************************************************************************************************************************
-void UsersTab::onSelectionChanged(QItemSelection, QItemSelection) {
+void UsersTab::onSelectionChanged(QItemSelection const&, QItemSelection const&) {
     this->updateGUIState();
 }
 
@@ -137,7 +138,6 @@ void UsersTab::onSelectionChanged(QItemSelection, QItemSelection) {
 //****************************************************************************************************************************************************
 void UsersTab::onSendUserBadEvent() {
     SPUser const user = selectedUser();
-    int const index = this->selectedIndex();
 
     if (!user) {
         app().log().error(QString("%1 failed. Unkown user.").arg(__FUNCTION__));
@@ -175,8 +175,8 @@ void UsersTab::onSendUsedBytesChangedEvent() {
         app().log().error(QString("%1 failed. User is not connected").arg(__FUNCTION__));
     }
 
-    qint64 const usedBytes = qint64(ui_.spinUsedBytes->value());
-    user->setUsedBytes(usedBytes);
+    auto const usedBytes = static_cast<qint64>(ui_.spinUsedBytes->value());
+    user->setUsedBytes(static_cast<float>(usedBytes));
     users_.touch(index);
 
     GRPCService &grpc = app().grpc();
@@ -217,6 +217,7 @@ void UsersTab::updateGUIState() {
     ui_.editUsernamePasswordError->setEnabled(ui_.checkUsernamePasswordError->isChecked());
     ui_.spinUsedBytes->setValue(user ? user->usedBytes() : 0.0);
     ui_.groupboxSync->setEnabled(user.get());
+    ui_.groupBoxNotification->setEnabled(hasSelectedUser && (UserState::Connected == state));
 
     if (user)
         ui_.editIMAPLoginFailedUsername->setText(user->primaryEmailOrUsername());
@@ -224,9 +225,10 @@ void UsersTab::updateGUIState() {
     QSignalBlocker b(ui_.checkSync);
     bool const syncing = user && user->isSyncing();
     ui_.checkSync->setChecked(syncing);
+    // ReSharper disable once CppDFAUnusedValue
     b = QSignalBlocker(ui_.sliderSync);
     ui_.sliderSync->setEnabled(syncing);
-    qint32 const progressPercent = syncing ? qint32(user->syncProgress() * 100.0f) : 0;
+    qint32 const progressPercent = syncing ? static_cast<qint32>(user->syncProgress() * 100.0f) : 0;
     ui_.sliderSync->setValue(progressPercent);
     ui_.labelSync->setText(syncing ? QString("%1%").arg(progressPercent) : "" );
 }
@@ -274,6 +276,22 @@ bridgepp::SPUser UsersTab::userWithID(QString const &userID) {
 //****************************************************************************************************************************************************
 bridgepp::SPUser UsersTab::userWithUsernameOrEmail(QString const &username) {
     return users_.userWithUsernameOrEmail(username);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return true if the next login attempt should trigger a human verification request
+//****************************************************************************************************************************************************
+bool UsersTab::nextUserHvRequired() const {
+    return ui_.checkHV3Required->isChecked();
+}
+
+
+//****************************************************************************************************************************************************
+/// \return true if the next login attempt should trigger a human verification error
+//****************************************************************************************************************************************************
+bool UsersTab::nextUserHvError() const {
+    return ui_.checkHV3Error->isChecked();
 }
 
 
@@ -418,7 +436,7 @@ void UsersTab::processBadEventUserFeedback(QString const &userID, bool doResync)
         return; // we do not do any form of emulation for resync.
     }
 
-    SPUser user = users_.userWithID(userID);
+    SPUser const user = users_.userWithID(userID);
     if (!user) {
         app().log().error(QString("%1(): could not find user with id %1.").arg(__func__, userID));
     }
@@ -464,12 +482,50 @@ void UsersTab::onCheckSyncToggled(bool checked) {
 //****************************************************************************************************************************************************
 void UsersTab::onSliderSyncValueChanged(int value) {
     SPUser const user = this->selectedUser();
-    if ((!user) || (!user->isSyncing()) || user->syncProgress() == value) {
+    if ((!user) || (!user->isSyncing()) || user->syncProgress() == static_cast<float>(value)) {
         return;
     }
 
     double const progress = value / 100.0;
-    user->setSyncProgress(progress);
+    user->setSyncProgress(static_cast<float>(progress));
     app().grpc().sendEvent(newSyncProgressEvent(user->id(), progress, 1, 1));  // we do not simulate elapsed & remaining.
     this->updateGUIState();
 }
+
+//****************************************************************************************************************************************************
+/// \return the title for the notification.
+//****************************************************************************************************************************************************
+QString UsersTab::notificationTitle() const {
+    return ui_.notificationTitle->text();
+}
+
+//****************************************************************************************************************************************************
+/// \return the subtitle for the notification.
+//****************************************************************************************************************************************************
+QString UsersTab::notificationSubtitle() const {
+    return ui_.notificationSubtitleText->text();
+}
+
+//****************************************************************************************************************************************************
+/// \return the body for the notification.
+//****************************************************************************************************************************************************
+QString UsersTab::notificationBody() const {
+    return ui_.notticationBodyText->text();
+}
+
+
+void UsersTab::onSendUserNotification() {
+    SPUser const user = selectedUser();
+    if (!user) {
+        app().log().error(QString("%1 failed. Unkown user.").arg(__FUNCTION__));
+        return;
+    }
+
+    GRPCService &grpc = app().grpc();
+
+    if (grpc.isStreaming()) {
+        QString const userID = user->id();
+        grpc.sendEvent(newUserNotificationEvent(userID, notificationTitle(), notificationSubtitle(), notificationBody()));
+    }
+}
+

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -31,14 +31,20 @@ const (
 	MacOSKeychain = "macos-keychain"
 )
 
-func listHelpers() (Helpers, string) {
+func listHelpers(skipKeychainTest bool) (Helpers, string) {
 	helpers := make(Helpers)
 
 	// MacOS always provides a keychain.
-	if isUsable(newMacOSHelper("")) {
+	if skipKeychainTest {
+		logrus.WithField("pkg", "keychain").Info("Skipping macOS keychain test")
 		helpers[MacOSKeychain] = newMacOSHelper
 	} else {
-		logrus.WithField("keychain", "MacOSKeychain").Warn("Keychain is not available.")
+		if isUsable(newMacOSHelper("")) {
+			helpers[MacOSKeychain] = newMacOSHelper
+			logrus.WithField("keychain", "MacOSKeychain").Info("Keychain is usable.")
+		} else {
+			logrus.WithField("keychain", "MacOSKeychain").Debug("Keychain is not available.")
+		}
 	}
 
 	// Use MacOSKeychain by default.
@@ -124,7 +130,7 @@ func (h *macOSHelper) Get(secretURL string) (string, string, error) {
 	}
 
 	if len(results) == 0 {
-		return "", "", errors.New("no result")
+		return "", "", ErrKeychainNoItem
 	}
 
 	if len(results) != 1 {

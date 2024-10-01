@@ -16,8 +16,6 @@
 # along with ProtonMail Bridge.  If not, see <https://www.gnu.org/licenses/>.
 
 ---
-image: gitlab.protontech.ch:4567/go/bridge-internal:test-go1.20
-
 default:
   tags:
     - shared-small
@@ -27,16 +25,26 @@ variables:
   GOMAXPROCS: $(( ${CI_TAG_CPU} / 2 ))
 
 before_script:
-  - apt update && apt-get -y install libsecret-1-dev
-  - git config --global url.https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}.insteadOf https://${CI_SERVER_HOST}
+  - |
+    if [ "$CI_JOB_NAME" != "grype-scan-code-dependencies" ]; then
+      apt update && apt-get -y install libsecret-1-dev
+      git config --global url.https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}.insteadOf https://${CI_SERVER_HOST}
+    fi
 
 stages:
+  - analyse
   - test
+  - report
   - build
 
 include:
+  - local: ci/setup.yml
   - local: ci/rules.yml
   - local: ci/env.yml
   - local: ci/test.yml
+  - local: ci/report.yml
   - local: ci/build.yml
+  - component: gitlab.protontech.ch/proton/devops/cicd-components/kits/devsecops/go@~latest
+    inputs:
+      stage: analyse
 

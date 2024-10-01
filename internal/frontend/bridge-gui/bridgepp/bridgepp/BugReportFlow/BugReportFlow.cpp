@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -28,13 +28,6 @@ namespace {
 
 
 namespace bridgepp {
-
-
-//****************************************************************************************************************************************************
-//
-//****************************************************************************************************************************************************
-BugReportFlow::BugReportFlow() {
-}
 
 
 //****************************************************************************************************************************************************
@@ -92,7 +85,7 @@ bool BugReportFlow::setAnswer(quint8 questionId, QString const &answer) {
 
 
 //****************************************************************************************************************************************************
-/// \param[in] questionId The id of the question.
+/// \param[in] categoryId The id of the question.
 /// \return answer the given question.
 //****************************************************************************************************************************************************
 QString BugReportFlow::getCategory(quint8 categoryId) const {
@@ -128,7 +121,7 @@ QString BugReportFlow::collectAnswers(quint8 categoryId) const {
 
     QVariantList sets = this->questionSet(categoryId);
     for (QVariant const &var: sets) {
-        const QString& answer = getAnswer(var.toInt());
+        const QString answer = getAnswer(var.toInt());
         if (answer.isEmpty())
             continue;
         answers += "#### " + questions_[var.toInt()].toMap()["text"].toString() + "\n\r";
@@ -136,6 +129,24 @@ QString BugReportFlow::collectAnswers(quint8 categoryId) const {
             answers += "> " + line + "\n\r";
     }
     return answers;
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] categoryId The id of the question set.
+//****************************************************************************************************************************************************
+QString BugReportFlow::collectUserInput(quint8 categoryId) const {
+    if (categoryId > categories_.count() - 1)
+        return {};
+
+    QString input = this->getCategory(categoryId);
+    for (QVariant const &var: this->questionSet(categoryId)) {
+        QString const answer = getAnswer(var.toInt());
+        if (!answer.isEmpty())
+            input += " " + answer;
+    }
+
+    return input;
 }
 
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -119,7 +119,7 @@ func parse(p *parser.Parser, allowInvalidAddressLists bool) (Message, error) {
 	}
 
 	if err := patchInlineImages(p); err != nil {
-		return Message{}, err
+		return Message{}, errors.Wrap(err, "patching inline images failed")
 	}
 
 	m, err := parseMessageHeader(p.Root().Header, allowInvalidAddressLists)
@@ -205,6 +205,10 @@ func convertForeignEncodings(p *parser.Parser) error {
 			return p.ConvertMetaCharset()
 		}).
 		RegisterContentTypeHandler("text/.*", func(p *parser.Part) error {
+			if p.IsAttachment() {
+				return nil
+			}
+
 			return p.ConvertToUTF8()
 		}).
 		Walk()
@@ -237,7 +241,7 @@ func collectAttachments(p *parser.Parser) ([]Attachment, error) {
 
 			return nil
 		}).
-		RegisterContentTypeHandler("text/.*", func(p *parser.Part) error {
+		RegisterContentTypeHandler("text/.*", func(_ *parser.Part) error {
 			return nil
 		}).
 		RegisterDefaultHandler(func(p *parser.Part) error {
@@ -313,14 +317,14 @@ func collectBodyParts(p *parser.Parser, preferredContentType string) (parser.Par
 
 			return bestChoice(childParts, preferredContentType), nil
 		}).
-		RegisterRule("text/plain", func(p *parser.Part, visit parser.Visit) (interface{}, error) {
+		RegisterRule("text/plain", func(p *parser.Part, _ parser.Visit) (interface{}, error) {
 			if p.IsAttachment() {
 				return parser.Parts{}, nil
 			}
 
 			return parser.Parts{p}, nil
 		}).
-		RegisterRule("text/html", func(p *parser.Part, visit parser.Visit) (interface{}, error) {
+		RegisterRule("text/html", func(p *parser.Part, _ parser.Visit) (interface{}, error) {
 			if p.IsAttachment() {
 				return parser.Parts{}, nil
 			}
@@ -400,7 +404,7 @@ func determineBodyMIMEType(p *parser.Parser) (string, error) {
 	var isHTML bool
 
 	w := p.NewWalker().
-		RegisterContentTypeHandler("text/html", func(p *parser.Part) (err error) {
+		RegisterContentTypeHandler("text/html", func(_ *parser.Part) (err error) {
 			isHTML = true
 			return
 		})
@@ -548,6 +552,11 @@ func parseAttachment(h message.Header, body []byte) (Attachment, error) {
 	att.Header = mimeHeader
 	mimeType, mimeTypeParams, err := pmmime.ParseMediaType(h.Get("Content-Type"))
 
+	if err == pmmime.EmptyContentTypeErr {
+		mimeType = "text/plain"
+		err = nil
+	}
+
 	if err != nil {
 		return Attachment{}, err
 	}
@@ -671,11 +680,10 @@ func patchInlineImages(p *parser.Parser) error {
 		if rfc822.MIMEType(contentType) == rfc822.TextPlain {
 			result[i] = &inlinePatchBodyOnly{part: curPart, contentTypeMap: contentTypeMap}
 		} else if strings.HasPrefix(contentType, "image/") {
-			disposition, _, err := curPart.ContentDisposition()
+			disposition, err := getImageContentDisposition(curPart)
 			if err != nil {
-				return fmt.Errorf("failted to get content disposition for child %v:%w", i, err)
+				return fmt.Errorf("failed to get content disposition for child %v:%w", i, err)
 			}
-
 			if disposition == "inline" && !curPart.HasContentID() {
 				if rfc822.MIMEType(prevContentType) == rfc822.TextPlain {
 					result[i-1] = &inlinePatchBodyWithInlineImage{
@@ -705,6 +713,23 @@ func patchInlineImages(p *parser.Parser) error {
 	}
 
 	return nil
+}
+
+func getImageContentDisposition(curPart *parser.Part) (string, error) {
+	disposition, _, err := curPart.ContentDisposition()
+	if err == nil {
+		return disposition, nil
+	}
+
+	if curPart.Header.Get("Content-Disposition") != "" {
+		return "", err
+	}
+
+	if curPart.HasContentID() {
+		return "inline", nil
+	}
+
+	return "attachment", nil
 }
 
 type inlinePatchJob interface {

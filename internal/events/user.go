@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -201,4 +201,27 @@ type UncategorizedEventError struct {
 
 func (event UncategorizedEventError) String() string {
 	return fmt.Sprintf("UncategorizedEventError: UserID: %s, Source:%T, Error: %s", event.UserID, event.Error, event.Error)
+}
+
+type UserLoadedCheckResync struct {
+	eventBase
+
+	UserID string
+}
+
+func (event UserLoadedCheckResync) String() string {
+	return fmt.Sprintf("UserLoadedCheckResync: UserID: %s", event.UserID)
+}
+
+type UserNotification struct {
+	eventBase
+
+	UserID   string
+	Title    string
+	Subtitle string
+	Body     string
+}
+
+func (event UserNotification) String() string {
+	return fmt.Sprintf("UserNotification: UserID: %s, Title: %s, Subtitle: %s, Body: %s", event.UserID, event.Title, event.Subtitle, event.Body)
 }

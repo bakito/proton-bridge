@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -40,6 +40,38 @@ typedef grpc::Status (grpc::Bridge::Stub::*StringGetter)(grpc::ClientContext *, 
 typedef grpc::Status (grpc::Bridge::Stub::*StringSetter)(grpc::ClientContext *, const google::protobuf::StringValue &, google::protobuf::Empty *);
 typedef grpc::Status (grpc::Bridge::Stub::*StringParamMethod)(grpc::ClientContext *, const google::protobuf::StringValue &, google::protobuf::Empty *);
 typedef std::unique_ptr<grpc::ClientContext> UPClientContext;
+
+
+//****************************************************************************************************************************************************
+/// \brief A struct for knowledge base suggestion.
+//****************************************************************************************************************************************************
+struct KnowledgeBaseSuggestion {
+    //  The following lines make the type transmissible to QML (but not instanciable there)
+    Q_GADGET
+    Q_PROPERTY(QString url MEMBER url)
+    Q_PROPERTY(QString title MEMBER title)
+public:
+    QString url; ///< The URL of the knowledge base article
+    QString title; ///< The title of the knowledge base article.
+};
+
+
+//****************************************************************************************************************************************************
+/// \brief A struct for user notitifications.
+//****************************************************************************************************************************************************
+    struct UserNotification {
+        //  The following lines make the type transmissible to QML (but not instanciable there)
+    Q_GADGET
+        Q_PROPERTY(QString title MEMBER title)
+        Q_PROPERTY(QString subtitle MEMBER subtitle)
+        Q_PROPERTY(QString body MEMBER body)
+        Q_PROPERTY(QString userID MEMBER userID)
+    public:
+        QString title; ///< The title of the notification.
+        QString subtitle; ///< The subtitle of the notification.
+        QString body; ///< The body of the notification.
+        QString userID; ///< The userID that received the notification.
+    };
 
 
 //****************************************************************************************************************************************************
@@ -93,6 +125,8 @@ public: // member functions.
     grpc::Status releaseNotesPageLink(QUrl &outUrl); ///< Performs the 'releaseNotesPageLink' call.
     grpc::Status landingPageLink(QUrl &outUrl); ///< Performs the 'landingPageLink' call.
     grpc::Status hostname(QString &outHostname); ///< Performs the 'Hostname' call.
+    grpc::Status requestKnowledgeBaseSuggestions(QString const &input); ///< Performs the 'RequestKnowledgeBaseSuggestions' call.
+    grpc::Status triggerRepair(); ///< Performs the triggerRepair gRPC call.
 
 signals: // app related signals
     void internetStatus(bool isOn);
@@ -106,9 +140,13 @@ signals: // app related signals
     void certificateInstallCanceled();
     void certificateInstallFailed();
     void showMainWindow();
+    void knowledgeBasSuggestionsReceived(QList<KnowledgeBaseSuggestion> const& suggestions);
+    void repairStarted();
+    void allUsersLoaded();
+    void userNotificationReceived(UserNotification const& notification);
 
-    // cache related calls
-public:
+
+public: // cache related calls
     grpc::Status diskCachePath(QUrl &outPath); ///< Performs the 'diskCachePath' call.
     grpc::Status setDiskCachePath(QUrl const &path); ///< Performs the 'setDiskCachePath' call
 
@@ -117,8 +155,8 @@ signals:
     void diskCachePathChanged(QUrl const &path);
     void diskCachePathChangeFinished();
 
-    // mail settings related calls
-public:
+
+public: // mail settings related calls
     grpc::Status mailServerSettings(qint32 &outIMAPPort, qint32 &outSMTPPort, bool &outUseSSLForIMAP, bool &outUseSSLForSMTP); ///< Performs the 'MailServerSettings' gRPC call.
     grpc::Status setMailServerSettings(qint32 imapPort, qint32 smtpPort, bool useSSLForIMAP, bool useSSLForSMTP); ///< Performs the 'SetMailServerSettings' gRPC call.
     grpc::Status isDoHEnabled(bool &outEnabled); ///< Performs the 'isDoHEnabled' gRPC call.
@@ -139,6 +177,7 @@ public: // login related calls
     grpc::Status login2FA(QString const &username, QString const &code); ///< Performs the 'login2FA' call.
     grpc::Status login2Passwords(QString const &username, QString const &password); ///< Performs the 'login2Passwords' call.
     grpc::Status loginAbort(QString const &username); ///< Performs the 'loginAbort' call.
+    grpc::Status loginHv(QString const &username, QString const &password); ///< Performs the 'login' call with additional useHv flag
 
 signals:
     void loginUsernamePasswordError(QString const &errMsg);
@@ -152,6 +191,8 @@ signals:
     void login2PasswordErrorAbort(QString const &errMsg);
     void loginFinished(QString const &userID, bool wasSignedOut);
     void loginAlreadyLoggedIn(QString const &userID);
+    void loginHvRequested(QString const &hvUrl);
+    void loginHvError(QString const &errMsg);
 
 public: // Update related calls
     grpc::Status checkUpdate();

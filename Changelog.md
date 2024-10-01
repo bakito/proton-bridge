@@ -3,6 +3,159 @@
 Changelog [format](http://keepachangelog.com/en/1.0.0/)
 
 
+## Dragon Bridge 3.14.0
+
+### Changed
+* BRIDGE-207: Failure to download or verify an update now fails silently.
+* BRIDGE-204: Removed redundant Sentry events.
+* BRIDGE-150: Observability service modification.
+* BRIDGE-210: Reduced log level of cache events so they won't be printed to stdout.
+
+### Fixed
+* BRIDGE-106: Fixed import of multipart-related messages.
+* BRIDGE-108: Fixed GetInitials when empty username is passed.
+
+
+## Colorado Bridge 3.13.0
+
+### Added
+* BRIDGE-37: added message broadcasting functionality.
+* BRIDGE-122: added observability service.
+* BRIDGE-119: added support for Feature Flags.
+* BRIDGE-116: added command-line switches to enable/disable keychain check on macOS.
+* BRIDGE-88: added context menu for quick actions on input labels: cut, copy, paste.
+
+### Changed
+* BRIDGE-81: KB article suggestion updates + more weight for long keywords.
+
+### Fixed
+* BRIDGE-67: Added detection for username changes on macOS & automatic reconfiguration.
+* BRIDGE-138: Remove deprecated doc.
+
+
+## Bastei Bridge 3.12.0
+
+### Added
+* BRIDGE-75: Bridge repair button.
+* BRIDGE-79: Add New Outlook for Mac KB disclaimer.
+
+### Changed
+* BRIDGE-16: Bump version Go 1.21.9 Qt 6.4.3.
+* BRIDGE-23: Update gluon to go 1.21.
+* BRIDGE-22: Update gpa to go 1.21.
+
+### Fixed
+* BRIDGE-90: Disable repair button when bridge cannot connect to proton servers; bump GPA.
+* BRIDGE-69: Explicitly handle semver panic for last bridge version from vault.
+* BRIDGE-29: Bump gluon version.
+* BRIDGE-49: Configure gitleaks baseline and grype config.
+* BRIDGE-21: Missing panic handling.
+* BRIDGE-17: Broken telemetry heartbeat test.
+* BRIDGE-10: Bumped gluon version.
+
+
+## Alcantara Bridge 3.11.1
+
+### Fixed
+* BRIDGE-70: Hotfix for blocked smtp/imap port causing bridge to quit.
+
+
+## Alcantara Bridge 3.11.0
+
+### Added
+* GODT-3185: Report cases which leads to wrong address key used.
+
+### Changed
+* BRIDGE-14: HV3 implementation.
+* BRIDGE-15: Certificate install is now also done during Outlook setup on macOS.
+* GODT-3146: Start servers on startup, keep running even when no users are active.
+* BRIDGE-19: Update checksum validation use warning instead of error on non-existing files.
+
+### Fixed
+* BRIDGE-8: Fix bridge double sessionID issue in logs.
+* BRIDGE-7: Modify keychain test on macOS.
+* BRIDGE-4: Logs not being created when invalid flag is passed.
+* BRIDGE-5: Add tooltip to tray icon.
+* GODT-3163: Filter MBOX format delimiter.
+
+
+## Zaehringen Bridge 3.10.0
+
+### Added
+* GODT-3199: Add package log field.
+* GODT-3220: Add more test scenarios.
+
+### Changed
+* GODT-3193: Preserve attachment encoding.
+* GODT-3214: Encrypt only with primary key.
+* GODT-2662: Use tart runner for darwin jobs.
+* GODT-1602: Test: run integration tests against black 🖤.
+* GODT-3257: Test: quad9 provider test not working on CI.
+
+### Fixed
+* GODT-3290: Fix test failing because of leap day.
+
+
+## Ypsilon Bridge 3.9.1
+
+### Fixed
+* GODT-3235: Update bridge update key.
+
+
+## Ypsilon Bridge 3.9.0
+
+### Added
+* GODT-3230: Scripts for removing Bridge from device.
+* GODT-3195: Add OS info to the log.
+* GODT-3156: Add time zone info to the bridge log.
+* GODT-3162: Test: Add test scenarios for KB article suggestions.
+* Test: Add scenarios for checking messages sent from Web Client.
+* GODT-3162: Test: Add step definition for checking KB article suggestions.
+
+### Changed
+* GODT-3160: Bump version Go 1.21.6.
+* GODT-3160: Load pipeline env from bridge internal.
+* GODT-3052: Test: Replace attachments and inline content in feature tests with the smallest valid versions.
+* GODT-3155: Customize log formatter for easier parsing.
+* GODT-3172: Detect missing keychain item.
+* GODT-3172: Do not list, just retrieve vault key.
+* Log the message received time when handling message creation event.
+* Set log as artefact for all integration test.
+* Get better logging arround keychain list initialisation.
+
+### Fixed
+* GODT-3229: Escape reserved XML characters in Apple configuration profile.
+* GODT-3228: Get rid of fork of docker-credential-helpers.
+* GODT-3176: Assume inline if content id is present.
+* GODT-3160: Ignore non-called vulnerabilities.
+* GODT-3160: Updated external dependencies reported by govulncheck.
+* GODT-3203: Crash in chunkDivide.
+* Fix for SMTP connection mode toggle in bridge-gui-tester.
+* GODT-3183: Fix database indices.
+* GODT-3187: Fix numberOfDay computation when changing year and day.
+* GODT-3188: Happy new year.
+
+
+## Xikou Bridge 3.8.2
+
+### Fixed
+* GODT-3235: Update bridge update key.
+
+
+## Xikou Bridge 3.8.1
+
+### Added
+* GODT-3121: Suggest relevant KB articles in the in-app bug report form.
+* GODT-2001: Add govulncheck to scan for vulnerabilities.
+
+### Changed
+* Keep nighlty-job log as artifact.
+* Test: Improve TestMetadata_JobCorrectlyFinishesAfterCancel.
+
+### Fixed
+* GODT-3153: Do not take into account full address when hasing messages.
+
+
 ## Xikou Bridge 3.8.0
 
 ### Added

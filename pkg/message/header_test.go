@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -126,7 +126,7 @@ func FuzzReadHeaderBody(f *testing.F) {
 	f.Add([]byte(data0))
 	f.Add([]byte(data1))
 
-	f.Fuzz(func(t *testing.T, b []byte) {
+	f.Fuzz(func(_ *testing.T, b []byte) {
 		_, _, _ = readHeaderBody(b)
 	})
 }

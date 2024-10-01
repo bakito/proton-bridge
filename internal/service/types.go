@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -19,4 +19,5 @@ package service
 
 type Locator interface {
 	ProvideSettingsPath() (string, error)
+	ProvideUnleashCachePath() (string, error)
 }

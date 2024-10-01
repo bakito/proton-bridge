@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -31,7 +31,7 @@ import (
 func TestTLSReporter_DoubleReport(t *testing.T) {
 	reportCounter := 0
 
-	reportServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	reportServer := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		reportCounter++
 	}))
 

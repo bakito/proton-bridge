@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/ProtonMail/gluon/async"
-	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/gluon/rfc5322"
 	"github.com/ProtonMail/gluon/rfc822"
 	"github.com/ProtonMail/go-proton-api"
@@ -103,8 +102,8 @@ func (s *Service) smtpSendMail(ctx context.Context, authID string, from string, 
 	}
 
 	if !fromAddr.Send || fromAddr.Status != proton.AddressStatusEnabled {
-		s.log.Errorf("Can't send emails on address: %v", fromAddr.Email)
-		return &ErrCanNotSendOnAddress{address: fromAddr.Email}
+		s.log.Errorf("Cannot send emails from address: %v", fromAddr.Email)
+		return &ErrCannotSendFromAddress{address: fromAddr.Email}
 	}
 
 	// Load the user's mail settings.
@@ -197,13 +196,7 @@ func (s *Service) sendWithKey(
 	}
 	parentID, draftsToDelete, err := getParentID(ctx, s.client, authAddrID, addrMode, references)
 	if err != nil {
-		if err := s.reporter.ReportMessageWithContext("Failed to get parent ID", reporter.Context{
-			"error":      err,
-			"references": message.References,
-		}); err != nil {
-			logrus.WithError(err).Error("Failed to report error")
-		}
-
+		// Sentry event has been removed; should be replaced with observability - BRIDGE-206.
 		s.log.WithError(err).Warn("Failed to get parent ID")
 	}
 

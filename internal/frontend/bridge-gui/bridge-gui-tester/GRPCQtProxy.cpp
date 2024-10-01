@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -31,10 +31,11 @@ GRPCQtProxy::GRPCQtProxy()
 //****************************************************************************************************************************************************
 //
 //****************************************************************************************************************************************************
-void GRPCQtProxy::connectSignals() {
+void GRPCQtProxy::connectSignals() const {
     MainWindow &mainWindow = app().mainWindow();
-    SettingsTab &settingsTab = mainWindow.settingsTab();
-    UsersTab &usersTab = mainWindow.usersTab();
+    SettingsTab const &settingsTab = mainWindow.settingsTab();
+    UsersTab const &usersTab = mainWindow.usersTab();
+    KnowledgeBaseTab const &kbTab = mainWindow.knowledgeBaseTab();
     connect(this, &GRPCQtProxy::delayedEventRequested, &mainWindow, &MainWindow::sendDelayedEvent);
     connect(this, &GRPCQtProxy::setIsAutostartOnReceived, &settingsTab, &SettingsTab::setIsAutostartOn);
     connect(this, &GRPCQtProxy::setIsBetaEnabledReceived, &settingsTab, &SettingsTab::setIsBetaEnabled);
@@ -56,6 +57,7 @@ void GRPCQtProxy::connectSignals() {
     connect(this, &GRPCQtProxy::setUserSplitModeReceived, &usersTab, &UsersTab::setUserSplitMode);
     connect(this, &GRPCQtProxy::configureUserAppleMailReceived, &usersTab, &UsersTab::configureUserAppleMail);
     connect(this, &GRPCQtProxy::sendBadEventUserFeedbackReceived, &usersTab, &UsersTab::processBadEventUserFeedback);
+    connect(this, &GRPCQtProxy::requestKnowledgeBaseSuggestionsReceived, &kbTab, &KnowledgeBaseTab::requestKnowledgeBaseSuggestions);
 }
 
 
@@ -119,6 +121,13 @@ void GRPCQtProxy::reportBug(QString const &osType, QString const &osVersion, QSt
     emit reportBugReceived(osType, osVersion, emailClient, address, description, includeLogs);
 }
 
+//****************************************************************************************************************************************************
+/// \param[in] userInput The user input.
+//****************************************************************************************************************************************************
+void GRPCQtProxy::requestKnowledgeBaseSuggestions(QString const& userInput) {
+    emit requestKnowledgeBaseSuggestionsReceived(userInput);
+}
+
 
 //****************************************************************************************************************************************************
 //
@@ -157,8 +166,8 @@ void GRPCQtProxy::setClientPlatform(QString const &clientPlatform) {
 /// \param[in] useSSLForIMAP The IMAP connexion mode.
 /// \param[in] useSSLForSMTP The IMAP connexion mode.
 //****************************************************************************************************************************************************
-void GRPCQtProxy::setMailServerSettings(qint32 imapPort, qint32 smtpPort, bool useSSLForIMAP, bool userSSLForSMTP) {
-    emit setMailServerSettingsReceived(imapPort, smtpPort, useSSLForIMAP, userSSLForSMTP);
+void GRPCQtProxy::setMailServerSettings(qint32 imapPort, qint32 smtpPort, bool useSSLForIMAP, bool useSSLForSMTP) {
+    emit setMailServerSettingsReceived(imapPort, smtpPort, useSSLForIMAP, useSSLForSMTP);
 }
 
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -182,6 +182,7 @@ TrayIcon::TrayIcon()
     , notificationErrorIcon_(loadIconFromSVG(":/qml/icons/ic-alert.svg")) {
     this->generateDotIcons();
     this->setContextMenu(menu_.get());
+    this->setToolTip(PROJECT_FULL_NAME);
 
     connect(menu_.get(), &QMenu::aboutToShow, this, &TrayIcon::onMenuAboutToShow);
     connect(this, &TrayIcon::selectUser, &app().backend(), [](QString const& userID, bool forceShowWindow) {
@@ -328,6 +329,15 @@ void TrayIcon::setState(TrayIcon::State state, QString const &stateString, QStri
 //****************************************************************************************************************************************************
 void TrayIcon::showErrorPopupNotification(QString const &title, QString const &message) {
     this->showMessage(title, message, notificationErrorIcon_);
+}
+
+//****************************************************************************************************************************************************
+/// Used only by user notifications received from the event loop
+/// \param[in] title The title.
+/// \param[in] subtitle The subtitle.
+//****************************************************************************************************************************************************
+void TrayIcon::showUserNotification(QString const &title, QString const &subtitle) {
+    this->showMessage(title, subtitle, QSystemTrayIcon::NoIcon);
 }
 
 

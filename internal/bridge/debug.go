@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -65,7 +65,11 @@ func (bridge *Bridge) CheckClientState(ctx context.Context, checkFlags bool, pro
 		if progressCB != nil {
 			progressCB(fmt.Sprintf("Checking state for user %v", usr.Name()))
 		}
-		log := logrus.WithField("user", usr.Name()).WithField("diag", "state-check")
+		log := logrus.WithFields(logrus.Fields{
+			"pkg":  "bridge/debug",
+			"user": usr.Name(),
+			"diag": "state-check",
+		})
 		log.Debug("Retrieving all server metadata")
 		meta, err := usr.GetDiagnosticMetadata(ctx)
 		if err != nil {
@@ -280,7 +284,7 @@ func clientGetMessageIDs(client *goimapclient.Client, mailbox string) (map[strin
 
 		internalID, ok := header.GetChecked("X-Pm-Internal-Id")
 		if !ok {
-			logrus.Errorf("Message %v does not have internal id", internalID)
+			logrus.WithField("pkg", "bridge/debug").Errorf("Message %v does not have internal id", internalID)
 			continue
 		}
 

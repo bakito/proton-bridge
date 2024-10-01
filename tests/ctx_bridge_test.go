@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/cookiejar"
 	"os"
 	"path/filepath"
@@ -34,6 +35,7 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/cookies"
+	"github.com/ProtonMail/proton-bridge/v3/internal/dialer"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	frontend "github.com/ProtonMail/proton-bridge/v3/internal/frontend/grpc"
 	"github.com/ProtonMail/proton-bridge/v3/internal/service"
@@ -146,6 +148,21 @@ func (t *testCtx) initBridge() (<-chan events.Event, error) {
 		logrus.SetLevel(logrus.TraceLevel)
 	}
 
+	rt := t.netCtl.NewRoundTripper(&tls.Config{InsecureSkipVerify: true})
+
+	// We store the round tripper in the testing context so we can cancel the connection
+	// when we're turning it down/up
+	t.rt = &rt
+
+	if isBlack() {
+		// GODT-1602 make sure we don't time out test server
+		t, ok := rt.(*http.Transport)
+		if !ok {
+			panic("expecting http.Transport")
+		}
+		dialer.SetBasicTransportTimeouts(t)
+	}
+
 	// Create the bridge.
 	bridge, eventCh, err := bridge.New(
 		// App stuff
@@ -161,7 +178,7 @@ func (t *testCtx) initBridge() (<-chan events.Event, error) {
 		persister,
 		useragent.New(),
 		t.mocks.TLSReporter,
-		t.netCtl.NewRoundTripper(&tls.Config{InsecureSkipVerify: true}),
+		rt,
 		t.mocks.ProxyCtl,
 		t.mocks.CrashHandler,
 		t.reporter,

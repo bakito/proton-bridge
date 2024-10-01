@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -331,6 +331,15 @@ FocusScope {
                         x: control.leftPadding
                         y: control.topPadding
                     }
+
+                    Proton.ContextMenu {
+                        parentObject: control
+                        colorScheme: root.colorScheme
+                        isPassword: control.echoMode === TextInput.Password
+                        readOnly: control.readOnly
+                    }
+
+
                 }
                 Proton.Button {
                     id: eyeButton

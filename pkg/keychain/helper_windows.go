@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -25,13 +25,14 @@ import (
 
 const WindowsCredentials = "windows-credentials"
 
-func listHelpers() (Helpers, string) {
+func listHelpers(_ bool) (Helpers, string) {
 	helpers := make(Helpers)
 	// Windows always provides a keychain.
 	if isUsable(newWinCredHelper("")) {
 		helpers[WindowsCredentials] = newWinCredHelper
+		logrus.WithField("keychain", "WindowsCredentials").Info("Keychain is usable.")
 	} else {
-		logrus.WithField("keychain", "WindowsCredentials").Warn("Keychain is not available.")
+		logrus.WithField("keychain", "WindowsCredentials").Debug("Keychain is not available.")
 	}
 	// Use WindowsCredentials by default.
 	return helpers, WindowsCredentials

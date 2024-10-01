@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -30,6 +30,7 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/frontend/theme"
+	"github.com/ProtonMail/proton-bridge/v3/internal/kb"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
 	"github.com/ProtonMail/proton-bridge/v3/internal/service"
 	"github.com/ProtonMail/proton-bridge/v3/internal/updater"
@@ -44,6 +45,7 @@ import (
 
 // CheckTokens implements the CheckToken gRPC service call.
 func (s *Service) CheckTokens(_ context.Context, clientConfigPath *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("CheckTokens")
 
 	path := clientConfigPath.Value
@@ -62,6 +64,7 @@ func (s *Service) CheckTokens(_ context.Context, clientConfigPath *wrapperspb.St
 }
 
 func (s *Service) AddLogEntry(_ context.Context, request *AddLogEntryRequest) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
 	entry := s.log
 
 	if len(request.Package) > 0 {
@@ -90,6 +93,7 @@ func (s *Service) AddLogEntry(_ context.Context, request *AddLogEntryRequest) (*
 
 // GuiReady implement the GuiReady gRPC service call.
 func (s *Service) GuiReady(_ context.Context, _ *emptypb.Empty) (*GuiReadyResponse, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("GuiReady")
 
 	s.initializationDone.Do(s.initializing.Done)
@@ -104,11 +108,13 @@ func (s *Service) GuiReady(_ context.Context, _ *emptypb.Empty) (*GuiReadyRespon
 
 // Quit implement the Quit gRPC service call.
 func (s *Service) Quit(_ context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("Quit")
-	return &emptypb.Empty{}, s.quit()
+	s.quit()
+	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) quit() error {
+func (s *Service) quit() {
 	// Windows is notably slow at Quitting. We do it in a goroutine to speed things up a bit.
 	go func() {
 		defer async.HandlePanic(s.panicHandler)
@@ -127,12 +133,11 @@ func (s *Service) quit() error {
 		// The following call is launched as a goroutine, as it will wait for current calls to end, including this one.
 		s.grpcServer.GracefulStop() // gRPC does clean up and remove the file socket if used.
 	}()
-
-	return nil
 }
 
 // Restart implement the Restart gRPC service call.
 func (s *Service) Restart(ctx context.Context, empty *emptypb.Empty) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("Restart")
 
 	s.restarter.Set(true, false)
@@ -140,12 +145,14 @@ func (s *Service) Restart(ctx context.Context, empty *emptypb.Empty) (*emptypb.E
 }
 
 func (s *Service) ShowOnStartup(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("ShowOnStartup")
 
 	return wrapperspb.Bool(s.showOnStartup), nil
 }
 
 func (s *Service) SetIsAutostartOn(_ context.Context, isOn *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.WithField("show", isOn.Value).Debug("SetIsAutostartOn")
 
 	defer func() { _ = s.SendEvent(NewToggleAutostartFinishedEvent()) }()
@@ -166,12 +173,14 @@ func (s *Service) SetIsAutostartOn(_ context.Context, isOn *wrapperspb.BoolValue
 }
 
 func (s *Service) IsAutostartOn(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("IsAutostartOn")
 
 	return wrapperspb.Bool(s.bridge.GetAutostart()), nil
 }
 
 func (s *Service) SetIsBetaEnabled(_ context.Context, isEnabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.WithField("isEnabled", isEnabled.Value).Debug("SetIsBetaEnabled")
 
 	channel := updater.StableChannel
@@ -188,12 +197,14 @@ func (s *Service) SetIsBetaEnabled(_ context.Context, isEnabled *wrapperspb.Bool
 }
 
 func (s *Service) IsBetaEnabled(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("IsBetaEnabled")
 
 	return wrapperspb.Bool(s.bridge.GetUpdateChannel() == updater.EarlyChannel), nil
 }
 
 func (s *Service) SetIsAllMailVisible(_ context.Context, isVisible *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.WithField("isVisible", isVisible.Value).Debug("SetIsAllMailVisible")
 
 	if err := s.bridge.SetShowAllMail(isVisible.Value); err != nil {
@@ -205,12 +216,14 @@ func (s *Service) SetIsAllMailVisible(_ context.Context, isVisible *wrapperspb.B
 }
 
 func (s *Service) IsAllMailVisible(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("IsAllMailVisible")
 
 	return wrapperspb.Bool(s.bridge.GetShowAllMail()), nil
 }
 
 func (s *Service) SetIsTelemetryDisabled(_ context.Context, isDisabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.WithField("isEnabled", isDisabled.Value).Debug("SetIsTelemetryDisabled")
 
 	if err := s.bridge.SetTelemetryDisabled(isDisabled.Value); err != nil {
@@ -222,12 +235,14 @@ func (s *Service) SetIsTelemetryDisabled(_ context.Context, isDisabled *wrappers
 }
 
 func (s *Service) IsTelemetryDisabled(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("IsTelemetryDisabled")
 
 	return wrapperspb.Bool(s.bridge.GetTelemetryDisabled()), nil
 }
 
 func (s *Service) GoOs(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("GoOs") // TO-DO We can probably get rid of this and use QSysInfo::product name
 
 	return wrapperspb.String(runtime.GOOS), nil
@@ -245,12 +260,14 @@ func (s *Service) TriggerReset(_ context.Context, _ *emptypb.Empty) (*emptypb.Em
 }
 
 func (s *Service) Version(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("Version")
 
 	return wrapperspb.String(s.bridge.GetCurrentVersion().Original()), nil
 }
 
 func (s *Service) LogsPath(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("LogsPath")
 
 	path, err := s.bridge.GetLogsPath()
@@ -262,30 +279,40 @@ func (s *Service) LogsPath(_ context.Context, _ *emptypb.Empty) (*wrapperspb.Str
 }
 
 func (s *Service) LicensePath(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	s.log.Debug("LicensePath")
 
 	return wrapperspb.String(s.bridge.GetLicenseFilePath()), nil
 }
 
 func (s *Service) DependencyLicensesLink(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
 	return wrapperspb.String(s.bridge.GetDependencyLicensesLink()), nil
 }
 
 func (s *Service) ReleaseNotesPageLink(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.latestLock.RLock()
-	defer s.latestLock.RUnlock()
+	defer func() {
+		async.HandlePanic(s.panicHandler)
+		s.latestLock.RUnlock()
+	}()
 
 	return wrapperspb.String(s.latest.ReleaseNotesPage), nil
 }
 
 func (s *Service) LandingPageLink(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
 	s.latestLock.RLock()
-	defer s.latestLock.RUnlock()
+	defer func() {
+		async.HandlePanic(s.panicHandler)
+		s.latestLock.RUnlock()
+	}()
 
 	return wrapperspb.String(s.latest.LandingPage), nil
 }
 
 func (s *Service) SetColorSchemeName(_ context.Context, name *wrapperspb.StringValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.WithField("ColorSchemeName", name.Value).Debug("SetColorSchemeName")
 
 	if !theme.IsAvailable(theme.Theme(name.Value)) {
@@ -302,6 +329,8 @@ func (s *Service) SetColorSchemeName(_ context.Context, name *wrapperspb.StringV
 }
 
 func (s *Service) ColorSchemeName(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("ColorSchemeName")
 
 	current := s.bridge.GetColorScheme()
@@ -317,6 +346,8 @@ func (s *Service) ColorSchemeName(_ context.Context, _ *emptypb.Empty) (*wrapper
 }
 
 func (s *Service) CurrentEmailClient(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("CurrentEmailClient")
 
 	return wrapperspb.String(s.bridge.GetCurrentUserAgent()), nil
@@ -360,6 +391,8 @@ func (s *Service) ReportBug(_ context.Context, report *ReportBugRequest) (*empty
 }
 
 func (s *Service) ForceLauncher(_ context.Context, launcher *wrapperspb.StringValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.WithField("launcher", launcher.Value).Debug("ForceLauncher")
 
 	s.restarter.Override(launcher.Value)
@@ -368,6 +401,8 @@ func (s *Service) ForceLauncher(_ context.Context, launcher *wrapperspb.StringVa
 }
 
 func (s *Service) SetMainExecutable(_ context.Context, exe *wrapperspb.StringValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.WithField("executable", exe.Value).Debug("SetMainExecutable")
 
 	s.restarter.AddFlags("--wait", exe.Value)
@@ -375,8 +410,33 @@ func (s *Service) SetMainExecutable(_ context.Context, exe *wrapperspb.StringVal
 	return &emptypb.Empty{}, nil
 }
 
+func (s *Service) RequestKnowledgeBaseSuggestions(_ context.Context, userInput *wrapperspb.StringValue) (*emptypb.Empty, error) {
+	s.log.Debug("RequestKnowledgeBaseSuggestions")
+	go func() {
+		defer async.HandlePanic(s.panicHandler)
+
+		articles, err := s.bridge.GetKnowledgeBaseSuggestions(userInput.Value)
+		if err != nil {
+			s.log.WithError(err).Error("Could not retrieve KB article suggestions")
+			articles = kb.ArticleList{}
+		}
+
+		_ = s.SendEvent(NewRequestKnowledgeBaseSuggestionsEvent(articles))
+	}()
+
+	return &emptypb.Empty{}, nil
+}
+
 func (s *Service) Login(_ context.Context, login *LoginRequest) (*emptypb.Empty, error) {
 	s.log.WithField("username", login.Username).Debug("Login")
+
+	var hvDetails *proton.APIHVDetails
+	if login.UseHvDetails != nil && *login.UseHvDetails {
+		hvDetails = s.hvDetails
+		s.useHvDetails = true
+	} else {
+		s.useHvDetails = false
+	}
 
 	go func() {
 		defer async.HandlePanic(s.panicHandler)
@@ -389,7 +449,7 @@ func (s *Service) Login(_ context.Context, login *LoginRequest) (*emptypb.Empty,
 			return
 		}
 
-		client, auth, err := s.bridge.LoginAuth(context.Background(), login.Username, password)
+		client, auth, err := s.bridge.LoginAuth(context.Background(), login.Username, password, hvDetails)
 		if err != nil {
 			defer s.loginClean()
 
@@ -402,6 +462,13 @@ func (s *Service) Login(_ context.Context, login *LoginRequest) (*emptypb.Empty,
 
 				case proton.PaidPlanRequired:
 					_ = s.SendEvent(NewLoginError(LoginErrorType_FREE_USER, ""))
+
+				case proton.HumanVerificationRequired:
+					s.handleHvRequest(apiErr)
+
+				case proton.HumanValidationInvalidToken:
+					s.hvDetails = nil
+					_ = s.SendEvent(NewLoginError(LoginErrorType_HV_ERROR, err.Error()))
 
 				default:
 					_ = s.SendEvent(NewLoginError(LoginErrorType_USERNAME_PASSWORD_ERROR, err.Error()))
@@ -504,7 +571,6 @@ func (s *Service) LoginAbort(_ context.Context, loginAbort *LoginAbortRequest) (
 
 	go func() {
 		defer async.HandlePanic(s.panicHandler)
-
 		s.loginAbort()
 	}()
 
@@ -558,6 +624,8 @@ func (s *Service) InstallUpdate(_ context.Context, _ *emptypb.Empty) (*emptypb.E
 }
 
 func (s *Service) SetIsAutomaticUpdateOn(_ context.Context, isOn *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.WithField("isOn", isOn.Value).Debug("SetIsAutomaticUpdateOn")
 
 	if currentlyOn := s.bridge.GetAutoUpdate(); currentlyOn == isOn.Value {
@@ -573,12 +641,16 @@ func (s *Service) SetIsAutomaticUpdateOn(_ context.Context, isOn *wrapperspb.Boo
 }
 
 func (s *Service) IsAutomaticUpdateOn(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("IsAutomaticUpdateOn")
 
 	return wrapperspb.Bool(s.bridge.GetAutoUpdate()), nil
 }
 
 func (s *Service) DiskCachePath(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("DiskCachePath")
 
 	return wrapperspb.String(s.bridge.GetGluonCacheDir()), nil
@@ -616,6 +688,8 @@ func (s *Service) SetDiskCachePath(_ context.Context, newPath *wrapperspb.String
 }
 
 func (s *Service) SetIsDoHEnabled(_ context.Context, isEnabled *wrapperspb.BoolValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.WithField("isEnabled", isEnabled.Value).Debug("SetIsDohEnabled")
 
 	if err := s.bridge.SetProxyAllowed(isEnabled.Value); err != nil {
@@ -627,12 +701,16 @@ func (s *Service) SetIsDoHEnabled(_ context.Context, isEnabled *wrapperspb.BoolV
 }
 
 func (s *Service) IsDoHEnabled(_ context.Context, _ *emptypb.Empty) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("IsDohEnabled")
 
 	return wrapperspb.Bool(s.bridge.GetProxyAllowed()), nil
 }
 
 func (s *Service) MailServerSettings(_ context.Context, _ *emptypb.Empty) (*ImapSmtpSettings, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("ConnectionMode")
 
 	return &ImapSmtpSettings{
@@ -696,24 +774,32 @@ func (s *Service) SetMailServerSettings(_ context.Context, settings *ImapSmtpSet
 }
 
 func (s *Service) Hostname(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("Hostname")
 
 	return wrapperspb.String(constants.Host), nil
 }
 
 func (s *Service) IsPortFree(_ context.Context, port *wrapperspb.Int32Value) (*wrapperspb.BoolValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("IsPortFree")
 
 	return wrapperspb.Bool(ports.IsPortFree(int(port.Value))), nil
 }
 
 func (s *Service) AvailableKeychains(_ context.Context, _ *emptypb.Empty) (*AvailableKeychainsResponse, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("AvailableKeychains")
 
 	return &AvailableKeychainsResponse{Keychains: s.bridge.GetHelpersNames()}, nil
 }
 
 func (s *Service) SetCurrentKeychain(ctx context.Context, keychain *wrapperspb.StringValue) (*emptypb.Empty, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.WithField("keychain", keychain.Value).Debug("SetCurrentKeyChain") // we do not check validity.
 
 	defer func() { _, _ = s.Restart(ctx, &emptypb.Empty{}) }()
@@ -738,6 +824,8 @@ func (s *Service) SetCurrentKeychain(ctx context.Context, keychain *wrapperspb.S
 }
 
 func (s *Service) CurrentKeychain(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
+	defer async.HandlePanic(s.panicHandler)
+
 	s.log.Debug("CurrentKeychain")
 
 	helper, err := s.bridge.GetKeychainApp()
@@ -747,6 +835,20 @@ func (s *Service) CurrentKeychain(_ context.Context, _ *emptypb.Empty) (*wrapper
 	}
 
 	return wrapperspb.String(helper), nil
+}
+
+func (s *Service) TriggerRepair(_ context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+	s.log.Debug("TriggerRepair")
+	go func() {
+		defer func() {
+			async.HandlePanic(s.panicHandler)
+			_ = s.SendEvent(NewRepairStartedEvent())
+		}()
+
+		s.bridge.Repair()
+	}()
+
+	return &emptypb.Empty{}, nil
 }
 
 func base64Decode(in []byte) ([]byte, error) {

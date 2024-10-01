@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -356,6 +356,24 @@ func (s *scenario) imapClientSeesMessageInMailboxWithStructure(clientID, mailbox
 		fetch, err := clientFetch(client, mailbox)
 		if err != nil {
 			return err
+		}
+
+		debug := false
+		for iFetch := range fetch {
+			if !debug {
+				continue
+			}
+
+			fmt.Printf("\n\n\n fetch %d %#v\n evenlope %+v\n",
+				iFetch, fetch[iFetch],
+				fetch[iFetch].Envelope,
+			)
+
+			for _, v := range fetch[iFetch].Body {
+				fmt.Println("body literal", v)
+			}
+
+			fmt.Printf("\n\n\n")
 		}
 
 		haveMessages := xslices.Map(fetch, newMessageStructFromIMAP)

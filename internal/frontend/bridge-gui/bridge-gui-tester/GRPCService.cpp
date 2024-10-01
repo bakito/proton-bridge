@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -29,17 +29,15 @@ using namespace bridgepp;
 
 namespace {
 
-
 QString const defaultKeychain = "defaultKeychain"; ///< The default keychain.
-
+QString const HV_ERROR_TEMPLATE = "failed to create new API client: 422 POST https://mail-api.proton.me/auth/v4: CAPTCHA validation failed (Code=12087, Status=422)";
 
 }
-
 
 //****************************************************************************************************************************************************
 //
 //****************************************************************************************************************************************************
-void GRPCService::connectProxySignals() {
+void GRPCService::connectProxySignals() const {
     qtProxy_.connectSignals();
 }
 
@@ -185,7 +183,7 @@ Status GRPCService::SetIsAllMailVisible(ServerContext *, BoolValue const *reques
 /// \param[out] response The response.
 /// \return The status for the call.
 //****************************************************************************************************************************************************
-Status GRPCService::IsAllMailVisible(ServerContext *, Empty const *request, BoolValue *response) {
+Status GRPCService::IsAllMailVisible(ServerContext *, Empty const *, BoolValue *response) {
     app().log().debug(__FUNCTION__);
     response->set_value(app().mainWindow().settingsTab().isAllMailVisible());
     return Status::OK;
@@ -349,8 +347,29 @@ Status GRPCService::ForceLauncher(ServerContext *, StringValue const *request, E
 /// \return The status for the call.
 //****************************************************************************************************************************************************
 Status GRPCService::SetMainExecutable(ServerContext *, StringValue const *request, Empty *) {
+    resetHv();
     app().log().debug(__FUNCTION__);
     app().log().info(QString("SetMainExecutable: %1").arg(QString::fromStdString(request->value())));
+    return Status::OK;
+}
+
+//****************************************************************************************************************************************************
+/// \param[in] request The request.
+/// \return The status for the call.
+//****************************************************************************************************************************************************
+grpc::Status GRPCService::RequestKnowledgeBaseSuggestions(ServerContext*, StringValue const* request, Empty*) {
+    QString const userInput = QString::fromUtf8(request->value());
+    app().log().info(QString("RequestKnowledgeBaseSuggestions: %1").arg(userInput.left(10) + "..."));
+    qtProxy_.requestKnowledgeBaseSuggestionsReceived(userInput);
+
+    QList<bridgepp::KnowledgeBaseSuggestion> suggestions;
+    for (qsizetype i = 1; i <= 3; ++i) {
+        suggestions.push_back(        {
+            .title = QString("Suggested link %1").arg(i),
+            .url = QString("https://proton.me/support/bridge#%1").arg(i),
+        });
+    }
+    qtProxy_.sendDelayedEvent(newKnowledgeBaseSuggestionsEvent(app().mainWindow().knowledgeBaseTab().getSuggestions()));
     return Status::OK;
 }
 
@@ -360,19 +379,19 @@ Status GRPCService::SetMainExecutable(ServerContext *, StringValue const *reques
 //****************************************************************************************************************************************************
 Status GRPCService::ReportBug(ServerContext *, ReportBugRequest const *request, Empty *) {
     app().log().debug(__FUNCTION__);
-    SettingsTab &tab = app().mainWindow().settingsTab();
+    EventsTab const&eventsTab = app().mainWindow().eventsTab();
     qtProxy_.reportBug(QString::fromStdString(request->ostype()), QString::fromStdString(request->osversion()),
         QString::fromStdString(request->emailclient()), QString::fromStdString(request->address()), QString::fromStdString(request->description()),
         request->includelogs());
     SPStreamEvent event;
-    switch (tab.nextBugReportResult()) {
-    case SettingsTab::BugReportResult::Success:
+    switch (eventsTab.nextBugReportResult()) {
+    case EventsTab::BugReportResult::Success:
         event = newReportBugSuccessEvent();
         break;
-    case SettingsTab::BugReportResult::Error:
+    case EventsTab::BugReportResult::Error:
         event = newReportBugErrorEvent();
         break;
-    case SettingsTab::BugReportResult::DataSharingError:
+    case EventsTab::BugReportResult::DataSharingError:
         event = newReportBugFallbackEvent();
         break;
     }
@@ -392,13 +411,25 @@ Status GRPCService::Login(ServerContext *, LoginRequest const *request, Empty *)
     UsersTab &usersTab = app().mainWindow().usersTab();
     loginUsername_ = QString::fromStdString(request->username());
 
-    SPUser const& user = usersTab.userTable().userWithUsernameOrEmail(QString::fromStdString(request->username()));
+    SPUser const &user = usersTab.userTable().userWithUsernameOrEmail(QString::fromStdString(request->username()));
     if (user) {
         qtProxy_.sendDelayedEvent(newLoginAlreadyLoggedInEvent(user->id()));
         return Status::OK;
     }
 
-
+    if (usersTab.nextUserHvRequired() && !hvWasRequested_ && previousHvUsername_ != QString::fromStdString(request->username())) {
+        hvWasRequested_ = true;
+        previousHvUsername_ = QString::fromStdString(request->username());
+        qtProxy_.sendDelayedEvent(newLoginHvRequestedEvent());
+        return Status::OK;
+    } else {
+        hvWasRequested_ = false;
+        previousHvUsername_ = "";
+    }
+    if (usersTab.nextUserHvError()) {
+        qtProxy_.sendDelayedEvent(newLoginError(LoginErrorType::HV_ERROR, HV_ERROR_TEMPLATE));
+        return Status::OK;
+    }
     if (usersTab.nextUserUsernamePasswordError()) {
         qtProxy_.sendDelayedEvent(newLoginError(LoginErrorType::USERNAME_PASSWORD_ERROR, usersTab.usernamePasswordErrorMessage()));
         return Status::OK;
@@ -427,7 +458,7 @@ Status GRPCService::Login(ServerContext *, LoginRequest const *request, Empty *)
 //****************************************************************************************************************************************************
 Status GRPCService::Login2FA(ServerContext *, LoginRequest const *request, Empty *) {
     app().log().debug(__FUNCTION__);
-    UsersTab &usersTab = app().mainWindow().usersTab();
+    UsersTab const &usersTab = app().mainWindow().usersTab();
     if (usersTab.nextUserTFAError()) {
         qtProxy_.sendDelayedEvent(newLoginError(LoginErrorType::TFA_ERROR, "2FA Error."));
         return Status::OK;
@@ -452,7 +483,7 @@ Status GRPCService::Login2FA(ServerContext *, LoginRequest const *request, Empty
 //****************************************************************************************************************************************************
 Status GRPCService::Login2Passwords(ServerContext *, LoginRequest const *request, Empty *) {
     app().log().debug(__FUNCTION__);
-    UsersTab &usersTab = app().mainWindow().usersTab();
+    UsersTab const &usersTab = app().mainWindow().usersTab();
 
     if (usersTab.nextUserTwoPasswordsError()) {
         qtProxy_.sendDelayedEvent(newLoginError(LoginErrorType::TWO_PASSWORDS_ERROR, "Two Passwords error."));
@@ -475,6 +506,7 @@ Status GRPCService::Login2Passwords(ServerContext *, LoginRequest const *request
 //****************************************************************************************************************************************************
 Status GRPCService::LoginAbort(ServerContext *, LoginAbortRequest const *request, Empty *) {
     app().log().debug(__FUNCTION__);
+    this->resetHv();
     loginUsername_ = QString();
     return Status::OK;
 }
@@ -542,12 +574,12 @@ Status GRPCService::DiskCachePath(ServerContext *, Empty const *, StringValue *r
 Status GRPCService::SetDiskCachePath(ServerContext *, StringValue const *path, Empty *) {
     app().log().debug(__FUNCTION__);
 
-    SettingsTab &tab = app().mainWindow().settingsTab();
+    EventsTab const &eventsTab = app().mainWindow().eventsTab();
     QString const qPath = QString::fromStdString(path->value());
 
     // we mimic the behaviour of Bridge
-    if (!tab.nextCacheChangeWillSucceed()) {
-        qtProxy_.sendDelayedEvent(newDiskCacheErrorEvent(grpc::DiskCacheErrorType(CANT_MOVE_DISK_CACHE_ERROR)));
+    if (!eventsTab.nextCacheChangeWillSucceed()) {
+        qtProxy_.sendDelayedEvent(newDiskCacheErrorEvent(static_cast<DiskCacheErrorType>(CANT_MOVE_DISK_CACHE_ERROR)));
     } else {
         qtProxy_.setDiskCachePath(qPath);
         qtProxy_.sendDelayedEvent(newDiskCachePathChangedEvent(qPath));
@@ -584,7 +616,7 @@ Status GRPCService::IsDoHEnabled(ServerContext *, Empty const *, BoolValue *resp
 /// \param[in] settings The IMAP/SMTP settings.
 /// \return The status for the call.
 //****************************************************************************************************************************************************
-Status GRPCService::SetMailServerSettings(::grpc::ServerContext *context, ImapSmtpSettings const *settings, Empty *) {
+Status GRPCService::SetMailServerSettings(ServerContext *, ImapSmtpSettings const *settings, Empty *) {
     app().log().debug(__FUNCTION__);
     qtProxy_.setMailServerSettings(settings->imapport(), settings->smtpport(), settings->usesslforimap(), settings->usesslforsmtp());
     qtProxy_.sendDelayedEvent(newMailServerSettingsChanged(*settings));
@@ -597,13 +629,13 @@ Status GRPCService::SetMailServerSettings(::grpc::ServerContext *context, ImapSm
 /// \param[out] outSettings The settings
 /// \return The status for the call.
 //****************************************************************************************************************************************************
-Status GRPCService::MailServerSettings(::grpc::ServerContext *, Empty const *, ImapSmtpSettings *outSettings) {
+Status GRPCService::MailServerSettings(ServerContext *, Empty const *, ImapSmtpSettings *outSettings) {
     app().log().debug(__FUNCTION__);
-    SettingsTab &tab = app().mainWindow().settingsTab();
+    SettingsTab const &tab = app().mainWindow().settingsTab();
     outSettings->set_imapport(tab.imapPort());
     outSettings->set_smtpport(tab.smtpPort());
     outSettings->set_usesslforimap(tab.useSSLForIMAP());
-    outSettings->set_usesslforimap(tab.useSSLForSMTP());
+    outSettings->set_usesslforsmtp(tab.useSSLForSMTP());
     return Status::OK;
 }
 
@@ -626,7 +658,7 @@ Status GRPCService::Hostname(ServerContext *, Empty const *, StringValue *respon
 //****************************************************************************************************************************************************
 Status GRPCService::IsPortFree(ServerContext *, Int32Value const *request, BoolValue *response) {
     app().log().debug(__FUNCTION__);
-    response->set_value(app().mainWindow().settingsTab().isPortFree());
+    response->set_value(app().mainWindow().eventsTab().isPortFree());
     return Status::OK;
 }
 
@@ -697,8 +729,8 @@ Status GRPCService::GetUserList(ServerContext *, Empty const *, UserListResponse
 //****************************************************************************************************************************************************
 Status GRPCService::GetUser(ServerContext *, StringValue const *request, grpc::User *response) {
     app().log().debug(__FUNCTION__);
-    QString userID = QString::fromStdString(request->value());
-    SPUser user = app().mainWindow().usersTab().userWithID(userID);
+    QString const userID = QString::fromStdString(request->value());
+    SPUser const user = app().mainWindow().usersTab().userWithID(userID);
     if (!user) {
         return Status(NOT_FOUND, QString("user not found %1").arg(userID).toStdString());
     }
@@ -766,14 +798,14 @@ Status GRPCService::ConfigureUserAppleMail(ServerContext *, ConfigureAppleMailRe
 /// \param[in] request The request
 /// \return The status for the call.
 //****************************************************************************************************************************************************
-Status GRPCService::ExportTLSCertificates(ServerContext *, StringValue const *request, Empty *response) {
+Status GRPCService::ExportTLSCertificates(ServerContext *, StringValue const *request, Empty *) {
     app().log().debug(__FUNCTION__);
-    SettingsTab &tab = app().mainWindow().settingsTab();
+    SettingsTab const &tab = app().mainWindow().settingsTab();
     if (!tab.nextTLSCertExportWillSucceed()) {
-        qtProxy_.sendDelayedEvent(newGenericErrorEvent(grpc::TLS_CERT_EXPORT_ERROR));
+        qtProxy_.sendDelayedEvent(newGenericErrorEvent(TLS_CERT_EXPORT_ERROR));
     }
     if (!tab.nextTLSKeyExportWillSucceed()) {
-        qtProxy_.sendDelayedEvent(newGenericErrorEvent(grpc::TLS_KEY_EXPORT_ERROR));
+        qtProxy_.sendDelayedEvent(newGenericErrorEvent(TLS_KEY_EXPORT_ERROR));
     }
     qtProxy_.exportTLSCertificates(QString::fromStdString(request->value()));
     return Status::OK;
@@ -932,4 +964,12 @@ void GRPCService::finishLogin() {
     }
 
     qtProxy_.sendDelayedEvent(newLoginFinishedEvent(user->id(), alreadyExist));
+}
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+void GRPCService::resetHv() {
+    hvWasRequested_ = false;
+    previousHvUsername_ = "";
 }

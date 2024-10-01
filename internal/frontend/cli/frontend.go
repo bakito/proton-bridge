@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -20,6 +20,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 
@@ -306,6 +307,12 @@ func New(
 		Aliases:   []string{"del", "rm", "remove"},
 		Completer: fe.completeUsernames,
 	})
+	fe.AddCmd(&ishell.Cmd{
+		Name:    "repair",
+		Help:    "reload all accounts and cached data, re-download emails. Email clients remain connected. Logged out users will be repaired on next login. (aliases: rep)",
+		Func:    fe.repair,
+		Aliases: []string{"rep"},
+	})
 
 	badEventCmd := &ishell.Cmd{
 		Name: "bad-event",
@@ -494,6 +501,18 @@ func (f *frontendCLI) watchEvents(eventCh <-chan events.Event) { // nolint:gocyc
 
 		case events.Raise:
 			f.Printf("Hello!")
+
+		case events.UserNotification:
+			user, err := f.bridge.GetUserInfo(event.UserID)
+			if err != nil {
+				return
+			}
+
+			fmt.Printf("\n--- NOTIFICATION ---\n\n")
+			fmt.Printf("Sent to: %s\n", user.Username)
+			fmt.Printf("Title: %s\n", event.Title)
+			fmt.Printf("Subtitle: %s\n", event.Subtitle)
+			fmt.Printf("Message: %s\n\n", event.Body)
 		}
 	}
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -19,7 +19,8 @@ QtObject {
         Info,
         Success,
         Warning,
-        Danger
+        Danger,
+        UserNotification
     }
 
     property list<Action> action
@@ -36,6 +37,9 @@ QtObject {
     readonly property var occurred: active ? new Date() : undefined
     property string title // title is used in dialogs only
     property int type
+    property string subtitle
+    property string username
+
 
     onActiveChanged: {
         dismissed = false;

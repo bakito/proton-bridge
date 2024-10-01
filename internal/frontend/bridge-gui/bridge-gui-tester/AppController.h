@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -42,10 +42,10 @@ public: // member functions.
     AppController &operator=(AppController const &) = delete; ///< Disabled assignment operator.
     AppController &operator=(AppController &&) = delete; ///< Disabled move assignment operator.
     void setMainWindow(MainWindow *mainWindow); ///< Set the main window.
-    MainWindow &mainWindow(); ///< Return the main window.
-    bridgepp::Log &log(); ///< Return a reference to the log.
-    bridgepp::Log &bridgeGUILog(); ///< Return a reference to the bridge-gui log.
-    GRPCService &grpc(); ///< Return a reference to the gRPC service.
+    MainWindow &mainWindow() const; ///< Return the main window.
+    bridgepp::Log &log() const; ///< Return a reference to the log.
+    bridgepp::Log &bridgeGUILog() const; ///< Return a reference to the bridge-gui log.
+    GRPCService &grpc() const; ///< Return a reference to the gRPC service.
 
 private: // member functions.
     AppController(); ///< Default constructor.

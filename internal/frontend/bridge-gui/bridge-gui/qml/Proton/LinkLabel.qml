@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -64,11 +64,12 @@ RowLayout {
     }
     ColorImage {
         Layout.alignment: Qt.AlignVCenter
+        Layout.bottomMargin: -6
         color: label.linkColor
         height: sourceSize.height
         source: "/qml/icons/ic-external-link.svg"
-        sourceSize.height: 16
-        sourceSize.width: 16
+        sourceSize.height: 14
+        sourceSize.width: 14
         visible: external
         width: sourceSize.width
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -22,9 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sync"
 	"time"
 
+	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/docker/docker-credential-helpers/credentials"
 	"github.com/sirupsen/logrus"
 )
@@ -41,7 +43,13 @@ var (
 
 	// ErrMacKeychainRebuild is returned on macOS with blocked or corrupted keychain.
 	ErrMacKeychainRebuild = errors.New("keychain error -25293")
+
+	ErrKeychainNoItem = errors.New("no such keychain item")
 )
+
+func IsErrKeychainNoItem(err error) bool {
+	return errors.Is(err, ErrKeychainNoItem) || credentials.IsErrCredentialsNotFound(err)
+}
 
 type Helpers map[string]helperConstructor
 
@@ -54,9 +62,9 @@ type List struct {
 // NewList checks availability of every keychains detected on the User Operating System
 // This will ask the user to unlock keychain(s) to check their usability.
 // This should only be called once.
-func NewList() *List {
+func NewList(skipKeychainTest bool) *List {
 	var list = List{locker: &sync.Mutex{}}
-	list.helpers, list.defaultHelper = listHelpers()
+	list.helpers, list.defaultHelper = listHelpers(skipKeychainTest)
 	return &list
 }
 
@@ -173,7 +181,16 @@ func (kc *Keychain) Get(userID string) (string, string, error) {
 	kc.locker.Lock()
 	defer kc.locker.Unlock()
 
-	return kc.helper.Get(kc.secretURL(userID))
+	id, key, err := kc.helper.Get(kc.secretURL(userID))
+	if err != nil {
+		return id, key, err
+	}
+
+	if key == "" {
+		return id, key, ErrKeychainNoItem
+	}
+
+	return id, key, err
 }
 
 func (kc *Keychain) Put(userID, secret string) error {
@@ -201,11 +218,7 @@ func isUsable(helper credentials.Helper, err error) bool {
 		return false
 	}
 
-	creds := &credentials.Credentials{
-		ServerURL: "bridge/check",
-		Username:  "check",
-		Secret:    "check",
-	}
+	creds := getTestCredentials()
 
 	if err := retry(func() error {
 		return helper.Add(creds)
@@ -225,6 +238,23 @@ func isUsable(helper credentials.Helper, err error) bool {
 	}
 
 	return true
+}
+
+func getTestCredentials() *credentials.Credentials {
+	// On macOS, a handful of users experience failures of the test credentials.
+	if runtime.GOOS == "darwin" {
+		return &credentials.Credentials{
+			ServerURL: hostURL(constants.KeyChainName) + fmt.Sprintf("/check_%v", time.Now().UTC().UnixMicro()),
+			Username:  "", // username is ignored on macOS, it's extracted from splitting the server URL
+			Secret:    "check",
+		}
+	}
+
+	return &credentials.Credentials{
+		ServerURL: "bridge/check",
+		Username:  "check",
+		Secret:    "check",
+	}
 }
 
 func retry(condition func() error) error {

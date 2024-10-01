@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -101,7 +101,7 @@ func (u *Updater) InstallUpdate(ctx context.Context, downloader Downloader, upda
 		update.Package+".sig",
 	)
 	if err != nil {
-		return ErrDownloadVerify
+		return fmt.Errorf("%w: %w", ErrDownloadVerify, err)
 	}
 
 	if err := u.installer.InstallUpdate(update.Version, bytes.NewReader(b)); err != nil {

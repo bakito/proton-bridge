@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -27,5 +27,5 @@ func NewIMAPLogger() *IMAPLogger {
 }
 
 func (l *IMAPLogger) Write(p []byte) (n int, err error) {
-	return logrus.WithField("pkg", "IMAP").WriterLevel(logrus.TraceLevel).Write(p)
+	return logrus.WithField("pkg", "log/IMAP").WriterLevel(logrus.TraceLevel).Write(p)
 }

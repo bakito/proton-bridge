@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -37,7 +37,7 @@ public: // member functions.
     ~GRPCService() override = default; ///< Destructor.
     GRPCService &operator=(GRPCService const &) = delete; ///< Disabled assignment operator.
     GRPCService &operator=(GRPCService &&) = delete; ///< Disabled move assignment operator.
-    void connectProxySignals(); ///< Connect the signals of the Qt Proxy to the GUI components
+    void connectProxySignals() const; ///< Connect the signals of the Qt Proxy to the GUI components
     bool isStreaming() const; ///< Check if the service is currently streaming events.
     grpc::Status CheckTokens(::grpc::ServerContext *context, ::google::protobuf::StringValue const *request, ::google::protobuf::StringValue *response) override;
     grpc::Status AddLogEntry(::grpc::ServerContext *, ::grpc::AddLogEntryRequest const *request, ::google::protobuf::Empty *) override;
@@ -67,6 +67,7 @@ public: // member functions.
     grpc::Status ReportBug(::grpc::ServerContext *, ::grpc::ReportBugRequest const *request, ::google::protobuf::Empty *) override;
     grpc::Status ForceLauncher(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status SetMainExecutable(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
+    grpc::Status RequestKnowledgeBaseSuggestions(::grpc::ServerContext *, ::google::protobuf::StringValue const *request, ::google::protobuf::Empty *) override;
     grpc::Status Login(::grpc::ServerContext *, ::grpc::LoginRequest const *request, ::google::protobuf::Empty *) override;
     grpc::Status Login2FA(::grpc::ServerContext *, ::grpc::LoginRequest const *request, ::google::protobuf::Empty *) override;
     grpc::Status Login2Passwords(::grpc::ServerContext *, ::grpc::LoginRequest const *request, ::google::protobuf::Empty *) override;
@@ -105,6 +106,7 @@ public: // member functions.
 
 private: // member functions
     void finishLogin(); ///< finish the login procedure once the credentials have been validated.
+    void resetHv(); ///< Resets the human verification state.
 
 private: // data member
     mutable QMutex eventStreamMutex_; ///< Mutex used to access eventQueue_, isStreaming_ and shouldStopStreaming_;
@@ -112,6 +114,8 @@ private: // data member
     bool isStreaming_; ///< Is the gRPC stream running. Access protected by eventStreamMutex_;
     bool eventStreamShouldStop_; ///< Should the stream be stopped? Access protected by eventStreamMutex
     QString loginUsername_; ///< The username used for the current login procedure.
+    QString previousHvUsername_; ///< The previous username used for HV.
+    bool hvWasRequested_ {false}; ///< Was human verification requested.
     GRPCQtProxy qtProxy_; ///< Qt Proxy used to send signals, as this class is not a QObject.
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ Item {
     property bool fillHeight: false
     default property alias items: content.children
 
-    function positionViewAtBegining() {
+    function positionViewAtBeginning() {
         scrollView.ScrollBar.vertical.position = 0
     }
     signal back

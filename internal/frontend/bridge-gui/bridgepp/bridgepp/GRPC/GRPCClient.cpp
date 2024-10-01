@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -22,7 +22,6 @@
 #include "../Exception/Exception.h"
 #include "../ProcessMonitor.h"
 #include "../Log/LogUtils.h"
-
 
 using namespace google::protobuf;
 using namespace grpc;
@@ -569,6 +568,14 @@ grpc::Status GRPCClient::hostname(QString &outHostname) {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] input The user input to analyze.
+//****************************************************************************************************************************************************
+grpc::Status GRPCClient::requestKnowledgeBaseSuggestions(QString const &input) {
+    return this->logGRPCCallStatus(this->setString(&Bridge::Stub::RequestKnowledgeBaseSuggestions, input), __FUNCTION__);
+}
+
+
+//****************************************************************************************************************************************************
 /// \param[out] outPath The value for the property.
 /// \return The status for the gRPC call.
 //****************************************************************************************************************************************************
@@ -597,6 +604,20 @@ grpc::Status GRPCClient::login(QString const &username, QString const &password)
     request.set_password(password.toStdString());
     return this->logGRPCCallStatus(stub_->Login(this->clientContext().get(), request, &empty), __FUNCTION__);
 }
+
+
+//****************************************************************************************************************************************************
+/// \param[in] username The username.
+/// \param[in] password The password.
+/// \return the status for the gRPC call.
+//****************************************************************************************************************************************************
+grpc::Status GRPCClient::loginHv(QString const &username, QString const &password) {
+        LoginRequest request;
+        request.set_username(username.toStdString());
+        request.set_password(password.toStdString());
+        request.set_usehvdetails(true);
+        return this->logGRPCCallStatus(stub_->Login(this->clientContext().get(), request, &empty), __FUNCTION__);
+    }
 
 
 //****************************************************************************************************************************************************
@@ -1164,6 +1185,38 @@ void GRPCClient::processAppEvent(AppEvent const &event) {
         this->logTrace("App event received: CertificateInstallFailed.");
         emit certificateInstallFailed();
         break;
+    case AppEvent::kKnowledgeBaseSuggestions:
+    {
+        this->logTrace("App event received: KnowledgeBaseSuggestions.");
+        QList<KnowledgeBaseSuggestion> suggestions;
+        for (grpc::KnowledgeBaseSuggestion const &suggestion: event.knowledgebasesuggestions().suggestions()) {
+            suggestions.push_back(KnowledgeBaseSuggestion{
+                .url = QString::fromUtf8(suggestion.url()),
+                .title = QString::fromUtf8(suggestion.title())
+            });
+        }
+        emit knowledgeBasSuggestionsReceived(suggestions);
+        break;
+    }
+    case AppEvent::kRepairStarted:
+        this->logTrace("App event received: RepairStarted.");
+        emit repairStarted();
+        break;
+    case AppEvent::kAllUsersLoaded:
+        this->logTrace("App event received: AllUsersLoaded");
+        emit allUsersLoaded();
+        break;
+    case AppEvent::kUserNotification: {
+        this->logTrace("App event received: UserNotification");
+        UserNotification notification{
+                .title = QString::fromStdString(event.usernotification().title()),
+                .subtitle = QString::fromStdString(event.usernotification().subtitle()),
+                .body = QString::fromStdString(event.usernotification().body()),
+                .userID = QString::fromStdString(event.usernotification().userid()),
+        };
+        emit userNotificationReceived(notification);
+        break;
+    }
     default:
         this->logError("Unknown App event received.");
     }
@@ -1200,6 +1253,9 @@ void GRPCClient::processLoginEvent(LoginEvent const &event) {
         case TWO_PASSWORDS_ABORT:
             emit login2PasswordErrorAbort(QString::fromStdString(error.message()));
             break;
+        case HV_ERROR:
+            emit loginHvError(QString::fromStdString(error.message()));
+            break;
         default:
             this->logError("Unknown login error event received.");
             break;
@@ -1223,6 +1279,10 @@ void GRPCClient::processLoginEvent(LoginEvent const &event) {
     case LoginEvent::kAlreadyLoggedIn:
         this->logTrace("Login event received: AlreadyLoggedIn.");
         emit loginAlreadyLoggedIn(QString::fromStdString(event.finished().userid()));
+        break;
+    case LoginEvent::kHvRequested:
+        this->logTrace("Login event Received: HvRequested");
+        emit loginHvRequested(QString::fromStdString(event.hvrequested().hvurl()));
         break;
     default:
         this->logError("Unknown Login event received.");
@@ -1537,6 +1597,13 @@ grpc::Status GRPCClient::externalLinkClicked(QString const &link) {
     StringValue s;
     s.set_value(link.toStdString());
     return this->logGRPCCallStatus(stub_->ExternalLinkClicked(this->clientContext().get(), s, &empty), __FUNCTION__);
+}
+
+//****************************************************************************************************************************************************
+//
+//****************************************************************************************************************************************************
+grpc::Status GRPCClient::triggerRepair()  {
+    return this->logGRPCCallStatus(stub_->TriggerRepair(this->clientContext().get(), empty, &empty), __FUNCTION__ );
 }
 
 

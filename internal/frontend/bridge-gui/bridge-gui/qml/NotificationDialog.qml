@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -22,6 +22,7 @@ Dialog {
 
     default property alias data: additionalChildrenContainer.children
     property var notification
+    property bool isUserNotification: false
 
     modal: true
     shouldShow: notification && notification.active && !notification.dismissed
@@ -39,13 +40,13 @@ Dialog {
                     return "";
                 }
                 switch (root.notification.type) {
-                case Notification.NotificationType.Info:
-                    return "/qml/icons/ic-info.svg";
-                case Notification.NotificationType.Success:
-                    return "/qml/icons/ic-success.svg";
-                case Notification.NotificationType.Warning:
-                case Notification.NotificationType.Danger:
-                    return "/qml/icons/ic-alert.svg";
+                    case Notification.NotificationType.Info:
+                        return "/qml/icons/ic-info.svg";
+                    case Notification.NotificationType.Success:
+                        return "/qml/icons/ic-success.svg";
+                    case Notification.NotificationType.Warning:
+                    case Notification.NotificationType.Danger:
+                        return "/qml/icons/ic-alert.svg";
                 }
             }
             sourceSize.height: 64

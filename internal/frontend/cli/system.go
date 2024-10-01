@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -358,4 +358,14 @@ func (f *frontendCLI) isFile(location string) bool {
 	}
 
 	return !stat.IsDir()
+}
+
+func (f *frontendCLI) repair(_ *ishell.Context) {
+	if f.bridge.HasAPIConnection() {
+		if f.yesNoQuestion("Are you sure you want to initialize a repair, this may take a while") {
+			f.bridge.Repair()
+		}
+	} else {
+		f.Println("Bridge cannot connect to the Proton servers. A connection is required to utilize this feature.")
+	}
 }

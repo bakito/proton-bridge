@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -30,6 +30,10 @@ QString const dateTimeFormat = "yyyyMMdd_hhmmsszzz"; ///< The format string for 
 
 
 namespace bridgepp {
+
+
+QString const sessionIDFlag = "session-id";
+QString const hyphenatedSessionIDFlag = "--" + sessionIDFlag;
 
 
 //****************************************************************************************************************************************************

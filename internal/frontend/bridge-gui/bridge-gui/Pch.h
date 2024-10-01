@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -26,6 +26,7 @@
 #include <QtWidgets>
 #include <QtQuickControls2>
 #include <QtSvg>
+#include <QtGui>
 #include <AppController.h>
 
 

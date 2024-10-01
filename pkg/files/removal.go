@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -56,7 +56,7 @@ func (op *OpRemove) Do() error {
 func remove(dir string, except ...string) error {
 	var toRemove []string
 
-	if err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dir, func(path string, _ os.FileInfo, _ error) error {
 		for _, exception := range except {
 			if path == exception || strings.HasPrefix(exception, path) || strings.HasPrefix(path, exception) {
 				return nil

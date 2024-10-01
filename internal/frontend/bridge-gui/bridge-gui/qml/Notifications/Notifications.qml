@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,8 @@
 import QtQml
 import Qt.labs.platform
 import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick
 import "../"
 
 QtObject {
@@ -60,7 +62,7 @@ QtObject {
             target: Backend
         }
     }
-    property var all: [root.noInternet, root.imapPortStartupError, root.smtpPortStartupError, root.imapPortChangeError, root.smtpPortChangeError, root.imapConnectionModeChangeError, root.smtpConnectionModeChangeError, root.updateManualReady, root.updateManualRestartNeeded, root.updateManualError, root.updateForce, root.updateForceError, root.updateSilentRestartNeeded, root.updateSilentError, root.updateIsLatestVersion, root.loginConnectionError, root.onlyPaidUsers, root.alreadyLoggedIn, root.enableBeta, root.bugReportSendSuccess, root.bugReportSendError, root.bugReportSendFallback, root.cacheCantMove, root.cacheLocationChangeSuccess, root.enableSplitMode, root.resetBridge, root.changeAllMailVisibility, root.deleteAccount, root.noKeychain, root.rebuildKeychain, root.addressChanged, root.apiCertIssue, root.userBadEvent, root.imapLoginWhileSignedOut, root.genericError, root.genericQuestion]
+    property var all: [root.noInternet, root.imapPortStartupError, root.smtpPortStartupError, root.imapPortChangeError, root.smtpPortChangeError, root.imapConnectionModeChangeError, root.smtpConnectionModeChangeError, root.updateManualReady, root.updateManualRestartNeeded, root.updateManualError, root.updateForce, root.updateForceError, root.updateSilentRestartNeeded, root.updateSilentError, root.updateIsLatestVersion, root.loginConnectionError, root.onlyPaidUsers, root.alreadyLoggedIn, root.enableBeta, root.bugReportSendSuccess, root.bugReportSendError, root.bugReportSendFallback, root.cacheCantMove, root.cacheLocationChangeSuccess, root.enableSplitMode, root.resetBridge, root.changeAllMailVisibility, root.deleteAccount, root.noKeychain, root.rebuildKeychain, root.addressChanged, root.apiCertIssue, root.userBadEvent, root.imapLoginWhileSignedOut, root.genericError, root.genericQuestion, root.hvErrorEvent, root.repairBridge, root.userNotification]
     property Notification alreadyLoggedIn: Notification {
         brief: qsTr("Already signed in")
         description: qsTr("This account is already signed in.")
@@ -1130,6 +1132,102 @@ QtObject {
             target: Backend
         }
     }
+    property Notification hvErrorEvent: Notification {
+        group: Notifications.Group.Configuration
+        icon: "./icons/ic-exclamation-circle-filled.svg"
+        type: Notification.NotificationType.Danger
+
+        action: Action {
+            text: qsTr("OK")
+            onTriggered: {
+                root.hvErrorEvent.active = false;
+            }
+        }
+
+        Connections {
+            function onLoginHvError(errorMsg) {
+                root.hvErrorEvent.active = true;
+                root.hvErrorEvent.description = errorMsg;
+            }
+            target: Backend
+        }
+
+    }
+    property Notification repairBridge: Notification {
+        brief: title
+        description: qsTr("This action will reload all accounts, cached data, and re-download emails. Messages may temporarily disappear but will reappear progressively. Email clients stay connected to Bridge.")
+        group: Notifications.Group.Configuration | Notifications.Group.Dialogs
+        icon: "./icons/ic-exclamation-circle-filled.svg"
+        title: qsTr("Repair Bridge?")
+        type: Notification.NotificationType.Danger
+
+        action: [
+            Action {
+                id: repairBridge_cancel
+                text: qsTr("Cancel")
+                onTriggered: {
+                    root.repairBridge.active = false;
+                }
+            },
+            Action {
+                id: repairBridge_repair
+                text: qsTr("Repair")
+                onTriggered: {
+                    repairBridge_repair.loading = true;
+                    repairBridge_repair.enabled = false;
+                    repairBridge_cancel.enabled = false;
+                    Backend.triggerRepair();
+                }
+            }
+        ]
+
+        Connections {
+            function onAskRepairBridge() {
+                root.repairBridge.active = true;
+            }
+            target: root
+        }
+
+        Connections {
+            function onRepairStarted() {
+                root.repairBridge.active = false;
+                repairBridge_repair.loading = false;
+                repairBridge_repair.enabled = true;
+                repairBridge_cancel.enabled = true;
+            }
+            target: Backend
+        }
+
+    }
+
+    property Notification userNotification: Notification {
+        brief: title
+        group: Notifications.Group.Dialogs
+        type: Notification.NotificationType.UserNotification
+        icon: "./icons/ic-exclamation-circle-filled.svg" // If it's not included QML complains
+
+        action: [
+            Action {
+                text: qsTr("Okay")
+                onTriggered: {
+                    root.userNotification.active = false;
+                    Backend.userNotificationDismissed();
+                }
+            }
+        ]
+
+        Connections {
+            function onReceivedUserNotification(notification) {
+                const userPrimaryEmailOrUsername = Backend.users.primaryEmailOrUsername(notification.userID)
+                root.userNotification.title = notification.title
+                root.userNotification.subtitle = notification.subtitle
+                root.userNotification.description = notification.body
+                root.userNotification.username = userPrimaryEmailOrUsername
+                root.userNotification.active = true
+            }
+            target: Backend
+        }
+    }
 
     signal askChangeAllMailVisibility(var isVisibleNow)
     signal askDeleteAccount(var user)
@@ -1137,4 +1235,5 @@ QtObject {
     signal askEnableSplitMode(var user)
     signal askQuestion(var title, var description, var option1, var option2, var action1, var action2)
     signal askResetBridge
+    signal askRepairBridge
 }

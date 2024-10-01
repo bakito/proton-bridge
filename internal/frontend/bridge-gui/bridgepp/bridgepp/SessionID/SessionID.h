@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -21,6 +21,10 @@
 
 
 namespace bridgepp {
+
+
+extern QString const sessionIDFlag; ///< The sessionID command-line flag (without hyphens)
+extern QString const hyphenatedSessionIDFlag; ///< The sessionID command-line flag (with two hyphens)
 
 
 QString newSessionID(); ///< Create a new sessions

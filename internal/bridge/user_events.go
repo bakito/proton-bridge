@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -36,8 +36,8 @@ func (bridge *Bridge) handleUserEvent(ctx context.Context, user *user.User, even
 	case events.UserBadEvent:
 		bridge.handleUserBadEvent(ctx, user, event)
 
-	case events.UncategorizedEventError:
-		bridge.handleUncategorizedErrorEvent(event)
+	case events.UserLoadedCheckResync:
+		user.VerifyResyncAndExecute()
 	}
 }
 
@@ -58,18 +58,9 @@ func (bridge *Bridge) handleUserBadEvent(ctx context.Context, user *user.User, e
 			"error":        event.Error,
 			"error_type":   internal.ErrCauseType(event.Error),
 		}); rerr != nil {
-			logrus.WithError(rerr).Error("Failed to report failed event handling")
+			logrus.WithField("pkg", "bridge/event").WithError(rerr).Error("Failed to report failed event handling")
 		}
 
 		user.OnBadEvent(ctx)
 	}, bridge.usersLock)
-}
-
-func (bridge *Bridge) handleUncategorizedErrorEvent(event events.UncategorizedEventError) {
-	if rerr := bridge.reporter.ReportMessageWithContext("Failed to handle due to uncategorized error", reporter.Context{
-		"error_type": internal.ErrCauseType(event.Error),
-		"error":      event.Error,
-	}); rerr != nil {
-		logrus.WithError(rerr).Error("Failed to report failed event handling")
-	}
 }

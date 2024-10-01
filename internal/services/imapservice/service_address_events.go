@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -155,6 +155,7 @@ func addNewAddressSplitMode(ctx context.Context, s *Service, addrID string) erro
 		s.sendRecorder,
 		s.panicHandler,
 		s.telemetry,
+		s.reporter,
 		s.showAllMail,
 		s.syncStateProvider,
 	)

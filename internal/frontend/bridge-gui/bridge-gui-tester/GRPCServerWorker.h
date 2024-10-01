@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -40,7 +40,7 @@ public: // member functions.
     GRPCServerWorker &operator=(GRPCServerWorker &&) = delete; ///< Disabled move assignment operator.
 
     void run() override; ///< Run the worker.
-    void stop();  ///< Stop the gRPC service.
+    void stop() const;  ///< Stop the gRPC service.
 
 private: // data members
     std::unique_ptr<grpc::Server> server_ { nullptr }; ///< The gRPC server.

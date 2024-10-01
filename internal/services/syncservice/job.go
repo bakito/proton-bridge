@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -158,10 +158,6 @@ type childJob struct {
 func (s *childJob) onError(err error) {
 	s.job.log.WithError(err).Info("Child job ran into error")
 	s.job.onError(err)
-}
-
-func (s *childJob) userID() string {
-	return s.job.userID
 }
 
 func (s *childJob) chunkDivide(chunks [][]proton.FullMessage) []childJob {

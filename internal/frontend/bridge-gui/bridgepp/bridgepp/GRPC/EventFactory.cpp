@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -248,6 +248,22 @@ SPStreamEvent newCertificateInstallFailedEvent() {
 
 
 //****************************************************************************************************************************************************
+/// \param[in] suggestions the suggestions
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newKnowledgeBaseSuggestionsEvent(QList<KnowledgeBaseSuggestion> const& suggestions) {
+    auto event = new grpc::KnowledgeBaseSuggestionsEvent;
+    for (KnowledgeBaseSuggestion const &suggestion: suggestions) {
+            grpc::KnowledgeBaseSuggestion *s = event->add_suggestions();
+            s->set_url(suggestion.url.toStdString());
+            s->set_title(suggestion.title.toStdString());
+    }
+    auto appEvent = new grpc::AppEvent;
+    appEvent->set_allocated_knowledgebasesuggestions(event);
+    return wrapAppEvent(appEvent);
+}
+
+//****************************************************************************************************************************************************
 /// \return The event.
 //****************************************************************************************************************************************************
 SPStreamEvent newShowMainWindowEvent() {
@@ -283,6 +299,18 @@ SPStreamEvent newLoginTfaRequestedEvent(QString const &username) {
     auto loginEvent = new grpc::LoginEvent;
     loginEvent->set_allocated_tfarequested(event);
     return wrapLoginEvent(loginEvent);
+}
+
+
+//****************************************************************************************************************************************************
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newLoginHvRequestedEvent() {
+        auto event = new ::grpc::LoginHvRequestedEvent;
+        event->set_hvurl("https://verify.proton.me/?methods=captcha&token=SOME_RANDOM_TOKEN");
+        auto loginEvent = new grpc::LoginEvent;
+        loginEvent->set_allocated_hvrequested(event);
+        return wrapLoginEvent(loginEvent);
 }
 
 
@@ -698,6 +726,25 @@ SPStreamEvent newGenericErrorEvent(grpc::ErrorCode errorCode) {
     auto event = new grpc::GenericErrorEvent;
     event->set_code(errorCode);
     return wrapGenericErrorEvent(event);
+}
+
+
+//****************************************************************************************************************************************************
+/// \param[in] userID The user ID that received the notification.
+/// \param[in] title The title of the notification.
+/// \param[in] subtitle The subtitle of the notification.
+/// \param[in] body The body of the notification.
+/// \return The event.
+//****************************************************************************************************************************************************
+SPStreamEvent newUserNotificationEvent(QString const &userID, QString const title, QString const subtitle, QString const body) {
+    auto event = new grpc::UserNotificationEvent;
+    event->set_userid(userID.toStdString());
+    event->set_body(body.toStdString());
+    event->set_subtitle(subtitle.toStdString());
+    event->set_title(title.toStdString());
+    auto appEvent = new grpc::AppEvent;
+    appEvent->set_allocated_usernotification(event);
+    return wrapAppEvent(appEvent);
 }
 
 

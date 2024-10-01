@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Proton AG
+// Copyright (c) 2024 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -38,6 +38,7 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/bridge"
 	"github.com/ProtonMail/proton-bridge/v3/internal/certs"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
+	"github.com/ProtonMail/proton-bridge/v3/internal/hv"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
 	"github.com/ProtonMail/proton-bridge/v3/internal/service"
 	"github.com/ProtonMail/proton-bridge/v3/internal/updater"
@@ -95,6 +96,9 @@ type Service struct { // nolint:structcheck
 	parentPID          int
 	parentPIDDoneCh    chan struct{}
 	showOnStartup      bool
+
+	hvDetails    *proton.APIHVDetails
+	useHvDetails bool
 }
 
 // NewService returns a new instance of the service.
@@ -397,6 +401,12 @@ func (s *Service) watchEvents() {
 
 		case events.TLSIssue:
 			_ = s.SendEvent(NewMailApiCertIssue())
+
+		case events.AllUsersLoaded:
+			_ = s.SendEvent(NewAllUsersLoadedEvent())
+
+		case events.UserNotification:
+			_ = s.SendEvent(NewUserNotificationEvent(event))
 		}
 	}
 }
@@ -412,6 +422,7 @@ func (s *Service) loginClean() {
 		s.password[i] = '\x00'
 	}
 	s.password = s.password[0:0]
+	s.useHvDetails = false
 }
 
 func (s *Service) finishLogin() {
@@ -423,6 +434,11 @@ func (s *Service) finishLogin() {
 	}()
 
 	wasSignedOut := s.bridge.HasUser(s.auth.UserID)
+
+	var hvDetails *proton.APIHVDetails
+	if s.useHvDetails {
+		hvDetails = s.hvDetails
+	}
 
 	if len(s.password) == 0 || s.auth.UID == "" || s.authClient == nil {
 		s.log.
@@ -439,8 +455,20 @@ func (s *Service) finishLogin() {
 	defer done()
 
 	ctx := context.Background()
-	userID, err := s.bridge.LoginUser(ctx, s.authClient, s.auth, s.password)
+	userID, err := s.bridge.LoginUser(ctx, s.authClient, s.auth, s.password, hvDetails)
 	if err != nil {
+		if hv.IsHvRequest(err) {
+			s.handleHvRequest(err)
+			performCleanup = false
+			return
+		}
+
+		if apiErr := new(proton.APIError); errors.As(err, &apiErr) && apiErr.Code == proton.HumanValidationInvalidToken {
+			s.hvDetails = nil
+			_ = s.SendEvent(NewLoginError(LoginErrorType_HV_ERROR, err.Error()))
+			return
+		}
+
 		s.log.WithError(err).Errorf("Finish login failed")
 		s.twoPasswordAttemptCount++
 		errType := LoginErrorType_TWO_PASSWORDS_ABORT
@@ -556,7 +584,7 @@ func validateServerToken(ctx context.Context, wantToken string) error {
 
 // newUnaryTokenValidator checks the server token for every unary gRPC call.
 func newUnaryTokenValidator(wantToken string) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if err := validateServerToken(ctx, wantToken); err != nil {
 			return nil, err
 		}
@@ -567,7 +595,7 @@ func newUnaryTokenValidator(wantToken string) grpc.UnaryServerInterceptor {
 
 // newStreamTokenValidator checks the server token for every gRPC stream request.
 func newStreamTokenValidator(wantToken string) grpc.StreamServerInterceptor {
-	return func(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv interface{}, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if err := validateServerToken(stream.Context(), wantToken); err != nil {
 			return err
 		}
@@ -601,9 +629,7 @@ func (s *Service) monitorParentPID() {
 				go func() {
 					defer async.HandlePanic(s.panicHandler)
 
-					if err := s.quit(); err != nil {
-						logrus.WithError(err).Error("Error on quit")
-					}
+					s.quit()
 				}()
 			}
 
@@ -612,6 +638,18 @@ func (s *Service) monitorParentPID() {
 			return
 		}
 	}
+}
+
+func (s *Service) handleHvRequest(err error) {
+	hvDet, hvErr := hv.VerifyAndExtractHvRequest(err)
+	if hvErr != nil {
+		_ = s.SendEvent(NewLoginError(LoginErrorType_HV_ERROR, hvErr.Error()))
+		return
+	}
+
+	s.hvDetails = hvDet
+	hvChallengeURL := hv.FormatHvURL(hvDet)
+	_ = s.SendEvent(NewLoginHvRequestedEvent(hvChallengeURL))
 }
 
 // computeFileSocketPath Return an available path for a socket file in the temp folder.
