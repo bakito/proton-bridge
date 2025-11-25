@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -21,18 +21,13 @@
 package sentry
 
 import (
-	"github.com/elastic/go-sysinfo"
+	"github.com/elastic/go-sysinfo/types"
 	"golang.org/x/sys/unix"
 )
 
 const translatedProcDarwin = "sysctl.proc_translated"
 
-func getHostArch() string {
-	host, err := sysinfo.Host()
-	if err != nil {
-		return "not-detected"
-	}
-
+func getHostArch(host types.Host) string {
 	// It is not possible to retrieve real hardware architecture once using
 	// rosetta. But it is possible to detect the process translation if
 	// rosetta is used.

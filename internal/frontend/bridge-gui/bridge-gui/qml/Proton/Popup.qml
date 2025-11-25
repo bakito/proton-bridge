@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@ T.Popup {
 
     property ColorScheme colorScheme
     readonly property var occurred: shouldShow ? new Date() : undefined
-    property int popupType: ApplicationWindow.PopupType.Banner
+    property int popupPriority: ApplicationWindow.PopupPriority.Banner
     property bool shouldShow: false
 
     function close() {

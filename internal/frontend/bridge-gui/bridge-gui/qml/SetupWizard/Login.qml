@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -14,6 +14,7 @@ import QtQml
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Controls.impl
 
 FocusScope {
     id: root
@@ -28,6 +29,7 @@ FocusScope {
     property alias username: usernameTextField.text
     property var wizard
     property string hvLinkUrl: ""
+    property bool hvLinkClicked: false
 
     signal loginAbort(string username, bool wasSignedOut)
 
@@ -48,6 +50,7 @@ FocusScope {
         }
         passwordTextField.hidePassword();
         secondPasswordTextField.hidePassword();
+        hvLinkClicked = false;
     }
     function resetViaHv() {
         usernameTextField.enabled = false;
@@ -55,6 +58,7 @@ FocusScope {
         signInButton.loading = true;
         secondPasswordButton.loading = false;
         secondPasswordTextField.enabled = true;
+        hvLinkClicked = false;
         totpLayout.reset();
     }
 
@@ -267,7 +271,10 @@ FocusScope {
                         usernameTextField.enabled = false;
                         passwordTextField.enabled = false;
                         loading = true;
-                        Backend.login(usernameTextField.text, Qt.btoa(passwordTextField.text));
+
+                        let usernameTextFiltered = usernameTextField.text.replace(/[\n\r]+$/, "");
+                        let passwordTextFiltered = passwordTextField.text.replace(/[\n\r]+$/, "");
+                        Backend.login(usernameTextFiltered, Qt.btoa(passwordTextFiltered));
                     }
 
                     Layout.fillWidth: true
@@ -561,6 +568,7 @@ FocusScope {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             Qt.openUrlExternally(hvLinkUrl);
+                            hvLinkClicked = true;
                         }
                     }
                 }
@@ -573,7 +581,8 @@ FocusScope {
                         id: hVContinueButton
                         Layout.fillWidth: true
                         colorScheme: wizard.colorScheme
-                        text: qsTr("Continue")
+                        text: qsTr("I’ve completed the verification")
+                        enabled: hvLinkClicked
 
                         function checkAndSignInHv() {
                             console.assert(stackLayout.currentIndex === Login.RootStack.HV ||  stackLayout.currentIndex === Login.RootStack.MailboxPassword, "Unexpected checkInAndSignInHv")

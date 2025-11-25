@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -14,6 +14,7 @@ import QtQml
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Controls.impl
 
 Rectangle {
     id: root
@@ -37,6 +38,8 @@ Rectangle {
     }
     height: 68
     radius: ProtonStyle.banner_radius
+    Accessible.role: Accessible.Button
+    Accessible.name: root.text
 
     RowLayout {
         anchors.fill: parent

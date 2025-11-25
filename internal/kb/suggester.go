@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -99,7 +99,7 @@ func GetArticleIndex(url string) (uint64, error) {
 	if index == -1 {
 		return 0, ErrArticleNotFound
 	}
-	return uint64(index), nil
+	return uint64(index), nil //nolint:gosec // disable G115
 }
 
 func simplifyUserInput(input string) string {

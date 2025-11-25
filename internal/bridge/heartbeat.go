@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -73,15 +73,15 @@ func (h *heartBeatState) init(bridge *Bridge, manager telemetry.HeartbeatManager
 		for _, user := range bridge.users {
 			if user.GetAddressMode() == vault.SplitMode {
 				splitMode = true
-				break
 			}
+			h.SetUserPlan(user.GetUserPlanName())
 		}
-		var nbAccount = len(bridge.users)
-		h.SetNbAccount(nbAccount)
+		var numberConnectedAccounts = len(bridge.users)
+		h.SetNumberConnectedAccounts(numberConnectedAccounts)
 		h.SetSplitMode(splitMode)
 
 		// Do not try to send if there is no user yet.
-		if nbAccount > 0 {
+		if numberConnectedAccounts > 0 {
 			defer h.start()
 		}
 	}, bridge.usersLock)

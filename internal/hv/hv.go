@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -21,6 +21,11 @@ import (
 	"github.com/ProtonMail/go-proton-api"
 )
 
+const (
+	ExtractionErrorMsg         = "Human verification requested, but an issue occurred. Please try again."
+	VerificationFailedErrorMsg = "Human verification failed. Please try again."
+)
+
 // VerifyAndExtractHvRequest expects an error request as input
 // determines whether the given error is a Proton human verification request; if it isn't then it returns -> nil, nil (no details, no error)
 // if it is a HV req. then it tries to parse the json data and verify that the captcha method is included; if either fails -> nil, err
@@ -34,7 +39,7 @@ func VerifyAndExtractHvRequest(err error) (*proton.APIHVDetails, error) {
 	if errors.As(err, &protonErr) && protonErr.IsHVError() {
 		hvDetails, hvErr := protonErr.GetHVDetails()
 		if hvErr != nil {
-			return nil, fmt.Errorf("received HV request, but can't decode HV details")
+			return nil, hvErr
 		}
 		return hvDetails, nil
 	}

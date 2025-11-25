@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -71,8 +71,8 @@ func grpcUserFromInfo(user bridge.UserInfo) *User {
 		AvatarText: getInitials(user.Username),
 		State:      userStateToGrpc(user.State),
 		SplitMode:  user.AddressMode == vault.SplitMode,
-		UsedBytes:  int64(user.UsedSpace),
-		TotalBytes: int64(user.MaxSpace),
+		UsedBytes:  int64(user.UsedSpace), //nolint:gosec // disable G115
+		TotalBytes: int64(user.MaxSpace),  //nolint:gosec // disable G115
 		Password:   user.BridgePass,
 		Addresses:  user.Addresses,
 	}

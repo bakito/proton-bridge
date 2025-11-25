@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@ Popup {
     implicitWidth: 600 // contentLayout.implicitWidth + contentLayout.anchors.leftMargin + contentLayout.anchors.rightMargin
     leftMargin: (mainWindow.width - root.implicitWidth) / 2
     modal: false
-    popupType: ApplicationWindow.PopupType.Banner
+    popupPriority: ApplicationWindow.PopupPriority.Banner
     shouldShow: notification ? (notification.active && !notification.dismissed) : false
     topMargin: 37
 

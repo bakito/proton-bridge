@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -19,25 +19,34 @@ package observability
 
 import "time"
 
-// DistinctionErrorTypeEnum - maps to the specific error schema for which we
-// want to send a user update.
-type DistinctionErrorTypeEnum int
+// DistinctionMetricTypeEnum - used to distinct specific metrics which we want to limit over some interval.
+// Most enums are tied to a specific error schema for which we also send a specific distinction user update.
+type DistinctionMetricTypeEnum int
 
 const (
-	SyncError DistinctionErrorTypeEnum = iota
-	EventLoopError
+	SyncError DistinctionMetricTypeEnum = iota
+	GluonImapError
+	GluonMessageError
+	GluonOtherError
+	SMTPError
+	EventLoopError // EventLoopError - should always be kept last when inserting new keys.
+	NewIMAPConnectionsExceedThreshold
 )
 
-// errorSchemaMap - maps between the DistinctionErrorTypeEnum and the relevant schema name.
-var errorSchemaMap = map[DistinctionErrorTypeEnum]string{ //nolint:gochecknoglobals
-	SyncError:      "bridge_sync_errors_users_total",
-	EventLoopError: "bridge_event_loop_events_errors_users_total",
+// errorSchemaMap - maps between some DistinctionMetricTypeEnum and the relevant schema name.
+var errorSchemaMap = map[DistinctionMetricTypeEnum]string{ //nolint:gochecknoglobals
+	SyncError:         "bridge_sync_errors_users_total",
+	EventLoopError:    "bridge_event_loop_events_errors_users_total",
+	GluonImapError:    "bridge_gluon_imap_errors_users_total",
+	GluonMessageError: "bridge_gluon_message_errors_users_total",
+	SMTPError:         "bridge_smtp_errors_users_total",
+	GluonOtherError:   "bridge_gluon_other_errors_users_total",
 }
 
 // createLastSentMap - needs to be updated whenever we make changes to the enum.
-func createLastSentMap() map[DistinctionErrorTypeEnum]time.Time {
+func createLastSentMap() map[DistinctionMetricTypeEnum]time.Time {
 	registerTime := time.Now().Add(-updateInterval)
-	lastSentMap := make(map[DistinctionErrorTypeEnum]time.Time)
+	lastSentMap := make(map[DistinctionMetricTypeEnum]time.Time)
 
 	for errType := SyncError; errType <= EventLoopError; errType++ {
 		lastSentMap[errType] = registerTime

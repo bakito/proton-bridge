@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -117,10 +117,10 @@ func TestInsertReadRemove(t *testing.T) {
 
 func TestIsErrKeychainNoItem(t *testing.T) {
 	r := require.New(t)
-	helpers := NewList(false).GetHelpers()
+	helpers := NewList().GetHelpers()
 
 	for helperName := range helpers {
-		kc, err := NewKeychain(helperName, "bridge-test", helpers, helperName)
+		kc, _, err := NewKeychain(helperName, "bridge-test", helpers, helperName)
 		r.NoError(err)
 
 		_, _, err = kc.Get("non-existing")

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -66,12 +66,7 @@ func (s *Accounts) CheckAuth(user string, password []byte) (string, string, erro
 			continue
 		}
 
-		account.service.telemetry.ReportSMTPAuthSuccess(context.Background())
 		return id, addrID, nil
-	}
-
-	for _, service := range s.accounts {
-		service.service.telemetry.ReportSMTPAuthFailed(user)
 	}
 
 	return "", "", ErrNoSuchUser

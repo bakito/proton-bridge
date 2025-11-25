@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -60,7 +60,7 @@ Item {
     }
     function showAppleMailAutoconfigProfileInstall() {
         showClientConfigCommon();
-        descriptionLabel.text = qsTr("The final step before you can start using Apple Mail is to install the Bridge server profile in the system preferences.\n\nAdding a server profile is necessary to ensure that your Mac can receive and send Proton Mails.");
+        descriptionLabel.text = qsTr("The final step before you can start using Apple Mail is to install the Bridge server profile in the system preferences.\n\nAdding a server profile is necessary to ensure that your Mac can receive and send Proton Mail messages.");
         linkLabel1.setCallback(function() { Backend.openExternalLink("https://proton.me/support/macos-certificate-warning"); }, qsTr("Why is there a yellow warning sign?"), true);
         linkLabel2.setCallback(wizard.showClientParams, qsTr("Configure Apple Mail manually"), false);
     }

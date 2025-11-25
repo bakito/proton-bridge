@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -36,9 +36,33 @@ var pollJitter = 2 * time.Minute  //nolint:gochecknoglobals
 
 const filename = "unleash_flags"
 
-type requestFeaturesFn func(ctx context.Context) (proton.FeatureFlagResult, error)
-type GetFlagValueFn func(key string) bool
+const (
+	EventLoopNotificationDisabled                 = "InboxBridgeEventLoopNotificationDisabled"
+	IMAPAuthenticateCommandDisabled               = "InboxBridgeImapAuthenticateCommandDisabled"
+	UserRemovalGluonDataCleanupDisabled           = "InboxBridgeUserRemovalGluonDataCleanupDisabled"
+	UpdateUseNewVersionFileStructureDisabled      = "InboxBridgeUpdateWithOsFilterDisabled"
+	LabelConflictResolverDisabled                 = "InboxBridgeLabelConflictResolverDisabled"
+	SMTPSubmissionRequestSentryReportDisabled     = "InboxBridgeSmtpSubmissionRequestSentryReportDisabled"
+	InternalLabelConflictResolverDisabled         = "InboxBridgeUnexpectedFoldersLabelsStartupFixupDisabled"
+	ItnternalLabelConflictNonEmptyMailboxDeletion = "InboxBridgeUnknownNonEmptyMailboxDeletion"
+)
 
+type FeatureFlagValueProvider interface {
+	GetFlagValue(key string) bool
+}
+
+// NullUnleashService - mock of the unleash service. Should be used for testing.
+type NullUnleashService struct{}
+
+func (n NullUnleashService) GetFlagValue(_ string) bool {
+	return false
+}
+
+func NewNullUnleashService() *NullUnleashService {
+	return &NullUnleashService{}
+}
+
+type requestFeaturesFn func(ctx context.Context) (proton.FeatureFlagResult, error)
 type Service struct {
 	panicHandler async.PanicHandler
 	timer        *proton.Ticker

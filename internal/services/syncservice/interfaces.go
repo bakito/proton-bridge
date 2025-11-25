@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -80,7 +80,6 @@ type MessageBuilder interface {
 
 type UpdateApplier interface {
 	ApplySyncUpdates(ctx context.Context, updates []BuildResult) error
-	SyncSystemLabelsOnly(ctx context.Context, labels map[string]proton.Label) error
 	SyncLabels(ctx context.Context, labels map[string]proton.Label) error
 }
 

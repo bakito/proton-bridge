@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -154,10 +154,10 @@ func addNewAddressSplitMode(ctx context.Context, s *Service, addrID string) erro
 		s.addressMode,
 		s.sendRecorder,
 		s.panicHandler,
-		s.telemetry,
 		s.reporter,
 		s.showAllMail,
 		s.syncStateProvider,
+		s.serverManager,
 	)
 
 	if err := s.serverManager.AddIMAPUser(ctx, connector, connector.addrID, s.gluonIDProvider, s.syncStateProvider); err != nil {
@@ -166,7 +166,7 @@ func addNewAddressSplitMode(ctx context.Context, s *Service, addrID string) erro
 
 	s.connectors[connector.addrID] = connector
 
-	updates, err := syncLabels(ctx, s.labels.GetLabelMap(), []*Connector{connector})
+	updates, err := syncLabels(ctx, s.labels.GetLabelMap(), []*Connector{connector}, s.labelConflictManager)
 	if err != nil {
 		return fmt.Errorf("failed to create labels updates for new address: %w", err)
 	}

@@ -3,6 +3,144 @@
 Changelog [format](http://keepachangelog.com/en/1.0.0/)
 
 
+## Kanmon Bridge 3.21.2
+
+### Fixed
+* BRIDGE-406: Fixed faulty certificate chain validation logic. Made certificate pin checks exclusive to leaf certificates.
+
+
+## Kanmon Bridge 3.21.1
+
+### Changed
+* BRIDGE-383: Extended internal mailbox conflict resolution logic and minor changes to the mailbox conflict pre-checker. 
+
+
+## Kanmon Bridge 3.21.0
+
+### Added 
+* BRIDGE-379: Mailbox pre-check on Bridge startup & conflict resolver for Bridge internal mailboxes. 
+
+### Changed
+* BRIDGE-376: Explicitly catch Gluon DB mailbox name conflicts and report them to Sentry.
+* BRIDGE-373: Extend user mailbox conflict resolver logging & report sync errors to Sentry.
+* BRIDGE-366: Kill switch support for IMAP IDLE.
+* BRIDGE-363: Observability metric support for IMAP connections.
+
+### Fixed
+* BRIDGE-377: Correct API label field usage on user label conflict resolver - update handler (event loop).
+* BRIDGE-378: Fix incorrect field usage for system mailbox names.
+
+
+## Jubilee Bridge 3.20.1
+
+### Fixed
+* BRIDGE-362: Implemented logic for reconciling label conflicts.
+
+
+## Jubilee Bridge 3.20.0
+
+### Added
+* BRIDGE-348: Enable display of BYOE addresses in Bridge.
+* BRIDGE-340: Added additional logging for label operations and related bad events.
+* BRIDGE-324: Log a hash of the vault key on Bridge start.
+
+### Changed
+* BRIDGE-352: Chore: bump go to 1.24.2.
+* BRIDGE-353: Chore: update x/net package to 0.38.0.
+
+### Fixed
+* BRIDGE-351: Allow draft creation and import to BYOE addresses in combined mode.
+* BRIDGE-301: Prevent imports into non-BYOE external addresses.
+* BRIDGE-341: Replaced go-autostart with a fork to support creating autostart shortcuts in directories with Unicode characters on Windows.
+* BRIDGE-332: Strip newline characters from username and password fields in the Bridge GUI.
+* BRIDGE-336: Ensure all remote labels are verified and created in Gluon at Bridge startup.
+* BRIDGE-335: Persist the last successfully used keychain helper as a user preference on Linux.
+* BRIDGE-333: Ignore unknown label IDs during Bridge synchronization.
+
+
+## Infinity Bridge 3.19.0
+
+### Changed
+* BRIDGE-316: Update Qt to latest LTS version 6.8.2.
+
+
+## Helix Bridge 3.18.0
+
+### Changed
+* BRIDGE-309: Revised update logic and structure.
+* BRIDGE-154: Added access token to expiry refresh request.
+
+
+## Grunwald Bridge 3.17.0
+
+### Added
+* BRIDGE-271: Report version file check failure to Sentry.
+* BRIDGE-247: Test: Automate Bridge 0% update rollout.
+* BRIDGE-248: Test: Additional Bridge UI e2e automation tests.
+
+### Changed
+* BRIDGE-73: Update goopenpgp.
+* BRIDGE-287: Update x/net and x/crypto dependencies.
+* BRIDGE-303: Update govulncheck to latest release.
+* BRIDGE-226: Bump Go version to 1.23.4.
+* BRIDGE-288: Extension to synchronization update handler, observability tweaks and gluon update.
+
+### Fixed
+* BRIDGE-291: Use correct field for user plan type.
+* BRIDGE-143: Add missing QML component attribute, cut/paste disabled on read-only text areas.
+
+
+## Flavien Bridge 3.16.0
+
+### Added
+* BRIDGE-205: Add support for the IMAP AUTHENTICATE command.
+* BRIDGE-268: Add kill switch feature flag for the IMAP AUTHENTICATE command.
+* BRIDGE-261: Delete gluon data during user deletion.
+* BRIDGE-246: Test: Add Settings Menu Bridge UI e2e automation tests.
+
+### Changed
+* BRIDGE-107: Improved human verification UX.
+* BRIDGE-281: Disable keychain test on macOS.
+* BRIDGE-266: Heartbeat telemetry update.
+* BRIDGE-253: Removed unused telemetry (activation and troubleshooting).
+* BRIDGE-252: Restored the -h shortcut for the CLI --help switch.
+* BRIDGE-264: Ignore apple notes as UserAgent.
+
+### Fixed
+* BRIDGE-256: Fix reversed order of headers with multiple values.
+* BRIDGE-258: Fixed issue with draft updates and sending during synchronization.
+
+
+## Erasmus Bridge 3.15.1
+
+### Changed
+* BRIDGE-281: Disable keychain test on macOS.
+
+
+## Erasmus Bridge 3.15.0
+
+### Added
+* BRIDGE-238: Added host information to sentry events; new sentry event for keychain issues.
+* BRIDGE-236: Added SMTP observability metrics.
+* BRIDGE-217: Added missing parameter to the CLI help command.
+* BRIDGE-234: Add accessibility name in QML for UI automation.
+* BRIDGE-232: Test: Add Home Menu Bridge UI e2e automation tests.
+* BRIDGE-220: Test: Add Bridge E2E UI login/logout tests for Windows.
+
+### Changed
+* BRIDGE-228: Removed sentry events.
+* BRIDGE-218: Observability adapter; gluon observability metrics and tests.
+* BRIDGE-215: Tweak wording on macOS profile install page.
+* BRIDGE-131: Test: Integration tests for messages from Proton <-> Gmail.
+* BRIDGE-142: Bridge icon can be removed from the menu bar on macOS.
+
+### Fixed
+* BRIDGE-240: Fix for running against Qt 6.8 (contribution of GitHub user Cimbali).
+* BRIDGE-231: Fix reversed header order in messages.
+* BRIDGE-235: Fix compilation of Bridge GUI Tester on Windows.
+* BRIDGE-120: Use appropriate address key when importing / saving draft.
+
+
 ## Dragon Bridge 3.14.0
 
 ### Changed

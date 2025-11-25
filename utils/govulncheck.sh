@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright (c) 2024 Proton AG
+# Copyright (c) 2025 Proton AG
 #
 # This file is part of Proton Mail Bridge.
 #
@@ -28,9 +28,8 @@ main(){
     jq -r '.finding | select( (.osv != null) and (.trace[0].function != null) ) | .osv ' < vulns.json > vulns_osv_ids.txt
 
     ignore GO-2023-2328 "GODT-3124 RESTY race condition"
-    ignore GO-2024-2887 "BRIDGE-95 net/http vulnerability"
-    ignore GO-2024-2888 "BRIDGE-95 archive/zip vulnerability"
-    ignore GO-2024-2963 "BRIDGE-95 net/http vulnerability"
+    ignore GO-2025-3563 "BRIDGE-346 net/http request smuggling"
+
     has_vulns
 
     echo

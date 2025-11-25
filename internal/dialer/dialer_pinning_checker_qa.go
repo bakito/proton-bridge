@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -23,6 +23,6 @@ import "net"
 
 // CheckCertificate returns whether the connection presents a known TLS certificate.
 // The QA implementation always returns nil.
-func (p *TLSPinChecker) CheckCertificate(conn net.Conn) error {
+func (p *TLSPinChecker) CheckCertificate(conn net.Conn, _ bool) error {
 	return nil
 }

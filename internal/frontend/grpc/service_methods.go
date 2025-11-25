@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -30,6 +30,7 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/frontend/theme"
+	"github.com/ProtonMail/proton-bridge/v3/internal/hv"
 	"github.com/ProtonMail/proton-bridge/v3/internal/kb"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
 	"github.com/ProtonMail/proton-bridge/v3/internal/service"
@@ -297,7 +298,14 @@ func (s *Service) ReleaseNotesPageLink(_ context.Context, _ *emptypb.Empty) (*wr
 		s.latestLock.RUnlock()
 	}()
 
-	return wrapperspb.String(s.latest.ReleaseNotesPage), nil
+	var releaseNotesPage string
+	if !s.latestLegacy.IsEmpty() {
+		releaseNotesPage = s.latestLegacy.ReleaseNotesPage
+	} else if !s.latest.IsEmpty() {
+		releaseNotesPage = s.latest.ReleaseNotesPage
+	}
+
+	return wrapperspb.String(releaseNotesPage), nil
 }
 
 func (s *Service) LandingPageLink(_ context.Context, _ *emptypb.Empty) (*wrapperspb.StringValue, error) {
@@ -307,7 +315,14 @@ func (s *Service) LandingPageLink(_ context.Context, _ *emptypb.Empty) (*wrapper
 		s.latestLock.RUnlock()
 	}()
 
-	return wrapperspb.String(s.latest.LandingPage), nil
+	var landingPage string
+	if !s.latestLegacy.IsEmpty() {
+		landingPage = s.latestLegacy.LandingPage
+	} else if !s.latest.IsEmpty() {
+		landingPage = s.latest.LandingPage
+	}
+
+	return wrapperspb.String(landingPage), nil
 }
 
 func (s *Service) SetColorSchemeName(_ context.Context, name *wrapperspb.StringValue) (*emptypb.Empty, error) {
@@ -468,7 +483,7 @@ func (s *Service) Login(_ context.Context, login *LoginRequest) (*emptypb.Empty,
 
 				case proton.HumanValidationInvalidToken:
 					s.hvDetails = nil
-					_ = s.SendEvent(NewLoginError(LoginErrorType_HV_ERROR, err.Error()))
+					_ = s.SendEvent(NewLoginError(LoginErrorType_HV_ERROR, hv.VerificationFailedErrorMsg))
 
 				default:
 					_ = s.SendEvent(NewLoginError(LoginErrorType_USERNAME_PASSWORD_ERROR, err.Error()))
@@ -616,7 +631,11 @@ func (s *Service) InstallUpdate(_ context.Context, _ *emptypb.Empty) (*emptypb.E
 		defer async.HandlePanic(s.panicHandler)
 
 		safe.RLock(func() {
-			s.bridge.InstallUpdate(s.target)
+			if !s.targetLegacy.IsEmpty() {
+				s.bridge.InstallUpdateLegacy(s.targetLegacy)
+			} else if !s.target.IsEmpty() {
+				s.bridge.InstallUpdate(s.target)
+			}
 		}, s.targetLock)
 	}()
 
@@ -717,8 +736,8 @@ func (s *Service) MailServerSettings(_ context.Context, _ *emptypb.Empty) (*Imap
 		state:         protoimpl.MessageState{},
 		sizeCache:     0,
 		unknownFields: nil,
-		ImapPort:      int32(s.bridge.GetIMAPPort()),
-		SmtpPort:      int32(s.bridge.GetSMTPPort()),
+		ImapPort:      int32(s.bridge.GetIMAPPort()), //nolint:gosec // disable G115
+		SmtpPort:      int32(s.bridge.GetSMTPPort()), //nolint:gosec // disable G115
 		UseSSLForImap: s.bridge.GetIMAPSSL(),
 		UseSSLForSmtp: s.bridge.GetSMTPSSL(),
 	}, nil
@@ -864,8 +883,8 @@ func base64Decode(in []byte) ([]byte, error) {
 
 func (s *Service) getMailServerSettings() *ImapSmtpSettings {
 	return &ImapSmtpSettings{
-		ImapPort:      int32(s.bridge.GetIMAPPort()),
-		SmtpPort:      int32(s.bridge.GetSMTPPort()),
+		ImapPort:      int32(s.bridge.GetIMAPPort()), //nolint:gosec // disable G115
+		SmtpPort:      int32(s.bridge.GetSMTPPort()), //nolint:gosec // disable G115
 		UseSSLForImap: s.bridge.GetIMAPSSL(),
 		UseSSLForSmtp: s.bridge.GetSMTPSSL(),
 	}

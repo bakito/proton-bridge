@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -318,11 +318,10 @@ func (bridge *Bridge) GetKnowledgeBaseSuggestions(userInput string) (kb.ArticleL
 // Note: it does not clear the keychain. The only entry in the keychain is the vault password,
 // which we need at next startup to decrypt the vault.
 func (bridge *Bridge) FactoryReset(ctx context.Context) {
-	useTelemetry := !bridge.GetTelemetryDisabled()
 	// Delete all the users.
 	safe.Lock(func() {
 		for _, user := range bridge.users {
-			bridge.logoutUser(ctx, user, true, true, useTelemetry)
+			bridge.logoutUser(ctx, user, true, true)
 		}
 	}, bridge.usersLock)
 

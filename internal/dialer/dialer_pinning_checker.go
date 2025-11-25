@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -40,4 +40,16 @@ func NewTLSPinChecker(trustedPins []string) *TLSPinChecker {
 
 func certFingerprint(cert *x509.Certificate) string {
 	return fmt.Sprintf(`pin-sha256=%q`, algo.HashBase64SHA256(string(cert.RawSubjectPublicKeyInfo)))
+}
+
+func (p *TLSPinChecker) isCertFoundInKnownPins(cert *x509.Certificate) bool {
+	fingerprint := certFingerprint(cert)
+
+	for _, pin := range p.trustedPins {
+		if pin == fingerprint {
+			return true
+		}
+	}
+
+	return false
 }

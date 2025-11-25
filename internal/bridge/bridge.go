@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -50,10 +50,12 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice"
 	"github.com/ProtonMail/proton-bridge/v3/internal/telemetry"
 	"github.com/ProtonMail/proton-bridge/v3/internal/unleash"
+	"github.com/ProtonMail/proton-bridge/v3/internal/updater"
 	"github.com/ProtonMail/proton-bridge/v3/internal/user"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/bradenaw/juniper/xslices"
+	"github.com/elastic/go-sysinfo/types"
 	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
 )
@@ -80,8 +82,9 @@ type Bridge struct {
 	imapEventCh chan imapEvents.Event
 
 	// updater is the bridge's updater.
-	updater   Updater
-	installCh chan installJob
+	updater         Updater
+	installChLegacy chan installJobLegacy
+	installCh       chan installJob
 
 	// heartbeat is the telemetry heartbeat for metrics.
 	heartbeat *heartBeatState
@@ -148,6 +151,9 @@ type Bridge struct {
 
 	// notificationStore is used for notification deduplication
 	notificationStore *notifications.Store
+
+	// getHostVersion primarily used for testing the update logic - it should return an OS version
+	getHostVersion func(host types.Host) string
 }
 
 var logPkg = logrus.WithField("pkg", "bridge") //nolint:gochecknoglobals
@@ -282,8 +288,9 @@ func newBridge(
 		tlsConfig:   tlsConfig,
 		imapEventCh: imapEventCh,
 
-		updater:   updater,
-		installCh: make(chan installJob),
+		updater:         updater,
+		installChLegacy: make(chan installJobLegacy),
+		installCh:       make(chan installJob),
 
 		curVersion:     curVersion,
 		newVersion:     curVersion,
@@ -315,6 +322,8 @@ func newBridge(
 		observabilityService: observabilityService,
 
 		notificationStore: notifications.NewStore(locator.ProvideNotificationsCachePath),
+
+		getHostVersion: func(host types.Host) string { return host.Info().OS.Version },
 	}
 
 	bridge.serverManager = imapsmtpserver.NewService(context.Background(),
@@ -325,6 +334,8 @@ func newBridge(
 		reporter,
 		uidValidityGenerator,
 		&bridgeIMAPSMTPTelemetry{b: bridge},
+		observabilityService,
+		unleashService,
 	)
 
 	// Check whether username has changed and correct (macOS only)
@@ -434,17 +445,46 @@ func (bridge *Bridge) init(tlsReporter TLSReporter) error {
 	// Check for updates when triggered.
 	bridge.goUpdate = bridge.tasks.PeriodicOrTrigger(constants.UpdateCheckInterval, 0, func(ctx context.Context) {
 		logPkg.Info("Checking for updates")
+		var versionLegacy updater.VersionInfoLegacy
+		var version updater.VersionInfo
+		var err error
 
-		version, err := bridge.updater.GetVersionInfo(ctx, bridge.api, bridge.vault.GetUpdateChannel())
+		useOldUpdateLogic := bridge.GetFeatureFlagValue(unleash.UpdateUseNewVersionFileStructureDisabled)
+		if useOldUpdateLogic {
+			versionLegacy, err = bridge.updater.GetVersionInfoLegacy(ctx, bridge.api, bridge.vault.GetUpdateChannel())
+		} else {
+			version, err = bridge.updater.GetVersionInfo(ctx, bridge.api)
+		}
+
 		if err != nil {
 			bridge.publish(events.UpdateCheckFailed{Error: err})
+			if errors.Is(err, updater.ErrVersionFileDownloadOrVerify) {
+				logPkg.WithError(err).Error("Cannot download or verify the version file")
+				if reporterErr := bridge.reporter.ReportMessageWithContext(
+					"Cannot download or verify the version file",
+					reporter.Context{"error": err},
+				); reporterErr != nil {
+					logPkg.WithError(reporterErr).Error("Failed to report version file check error")
+				}
+			}
 		} else {
-			bridge.handleUpdate(version)
+			if useOldUpdateLogic {
+				bridge.handleUpdateLegacy(versionLegacy)
+			} else {
+				bridge.handleUpdate(version)
+			}
 		}
 	})
 	defer bridge.goUpdate()
 
-	// Install updates when available.
+	// Install updates when available - based on old update logic
+	bridge.tasks.Once(func(ctx context.Context) {
+		async.RangeContext(ctx, bridge.installChLegacy, func(job installJobLegacy) {
+			bridge.installUpdateLegacy(ctx, job)
+		})
+	})
+
+	// Install updates when available - based on new update logic
 	bridge.tasks.Once(func(ctx context.Context) {
 		async.RangeContext(ctx, bridge.installCh, func(job installJob) {
 			bridge.installUpdate(ctx, job)
@@ -635,14 +675,6 @@ func loadTLSConfig(vault *vault.Vault) (*tls.Config, error) {
 	}, nil
 }
 
-func min(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-
-	return b
-}
-
 func (bridge *Bridge) HasAPIConnection() bool {
 	return bridge.api.GetStatus() == proton.StatusUp
 }
@@ -689,13 +721,13 @@ func (bridge *Bridge) verifyUsernameChange() {
 func GetUpdatedCachePath(gluonDBPath, gluonCachePath string) string {
 	// If gluon cache is moved to an external drive; regex find will fail; as is expected
 	cachePathMatches := usernameChangeRegex.FindStringSubmatch(gluonCachePath)
-	if cachePathMatches == nil || len(cachePathMatches) < 2 {
+	if len(cachePathMatches) < 2 {
 		return ""
 	}
 
 	cacheUsername := cachePathMatches[1]
 	dbPathMatches := usernameChangeRegex.FindStringSubmatch(gluonDBPath)
-	if dbPathMatches == nil || len(dbPathMatches) < 2 {
+	if len(dbPathMatches) < 2 {
 		return ""
 	}
 
@@ -715,10 +747,41 @@ func (bridge *Bridge) PushObservabilityMetric(metric proton.ObservabilityMetric)
 	bridge.observabilityService.AddMetrics(metric)
 }
 
-func (bridge *Bridge) PushDistinctObservabilityMetrics(errType observability.DistinctionErrorTypeEnum, metrics ...proton.ObservabilityMetric) {
+func (bridge *Bridge) PushDistinctObservabilityMetrics(errType observability.DistinctionMetricTypeEnum, metrics ...proton.ObservabilityMetric) {
 	bridge.observabilityService.AddDistinctMetrics(errType, metrics...)
 }
 
 func (bridge *Bridge) ModifyObservabilityHeartbeatInterval(duration time.Duration) {
 	bridge.observabilityService.ModifyHeartbeatInterval(duration)
+}
+
+func (bridge *Bridge) ReportMessageWithContext(message string, messageCtx reporter.Context) {
+	if err := bridge.reporter.ReportMessageWithContext(message, messageCtx); err != nil {
+		logPkg.WithFields(logrus.Fields{
+			"err":           err,
+			"sentryMessage": message,
+			"messageCtx":    messageCtx,
+		}).Info("Error occurred when sending Report to Sentry")
+	}
+}
+
+// GetUsers is only used for testing purposes.
+func (bridge *Bridge) GetUsers() map[string]*user.User {
+	return bridge.users
+}
+
+// SetCurrentVersionTest - sets the current version of bridge; should only be used for tests.
+func (bridge *Bridge) SetCurrentVersionTest(version *semver.Version) {
+	bridge.curVersion = version
+	bridge.newVersion = version
+}
+
+// SetHostVersionGetterTest - sets the OS version helper func; only used for testing.
+func (bridge *Bridge) SetHostVersionGetterTest(fn func(host types.Host) string) {
+	bridge.getHostVersion = fn
+}
+
+// SetRolloutPercentageTest - sets the rollout percentage; should only be used for testing.
+func (bridge *Bridge) SetRolloutPercentageTest(rollout float64) error {
+	return bridge.vault.SetUpdateRollout(rollout)
 }

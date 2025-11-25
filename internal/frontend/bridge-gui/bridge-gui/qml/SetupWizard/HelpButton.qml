@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -33,6 +33,7 @@ Button {
     icon.source: "/qml/icons/ic-question-circle.svg"
     icon.width: _iconSize
     verticalPadding: 0
+    Accessible.name: qsTr("Help")
 
     onClicked: {
         menu.popup(-menu.width + root.width, -menu.height);

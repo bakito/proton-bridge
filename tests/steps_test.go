@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.Bridge.
 //
@@ -39,6 +39,8 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^bridge IMAP port is (\d+)`, s.bridgeIMAPPortIs)
 	ctx.Step(`^bridge SMTP port is (\d+)`, s.bridgeSMTPPortIs)
 	ctx.Step(`^the message used "([^"]*)" key for sending$`, s.theMessageUsedKeyForSending)
+	ctx.Step(`^the key for address "([^"]*)" was used to import`, s.theKeyForAddressWasUsedToImport)
+	ctx.Step(`^the key for address "([^"]*)" was used to create draft`, s.theKeyForAddressWasUsedToCreateDraft)
 
 	// ==== SETUP ====
 	ctx.Step(`^there exists an account with username "([^"]*)" and password "([^"]*)"$`, s.thereExistsAnAccountWithUsernameAndPassword)
@@ -97,6 +99,9 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^bridge reports a message with "([^"]*)"$`, s.bridgeReportsMessage)
 	ctx.Step(`^bridge telemetry feature is enabled$`, s.bridgeTelemetryFeatureEnabled)
 	ctx.Step(`^bridge telemetry feature is disabled$`, s.bridgeTelemetryFeatureDisabled)
+	ctx.Step(`^the legacy update kill switch is enabled$`, s.bridgeLegacyUpdateKillSwitchEnabled)
+	ctx.Step(`^bridge verifies that the legacy update is enabled$`, s.bridgeLegacyUpdateEnabled)
+	ctx.Step(`^bridge checks for updates$`, s.bridgeChecksForUpdates)
 
 	// ==== FRONTEND ====
 	ctx.Step(`^frontend sees that bridge is version "([^"]*)"$`, s.frontendSeesThatBridgeIsVersion)
@@ -114,6 +119,7 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^user "([^"]*)" has telemetry set to (\d+)$`, s.userHasTelemetrySetTo)
 	ctx.Step(`^the bridge password of user "([^"]*)" is changed to "([^"]*)"`, s.bridgePasswordOfUserIsChangedTo)
 	ctx.Step(`^the bridge password of user "([^"]*)" is equal to "([^"]*)"`, s.bridgePasswordOfUserIsEqualTo)
+	ctx.Step(`^user "([^"]*)" is deleted alongside IMAP data for client "([^"]*)"$`, s.userIsDeletedAndImapDataRemoved)
 
 	// ==== ACCOUNT SETTINGS ====
 	ctx.Step(`^the account "([^"]*)" has public key attachment "([^"]*)"`, s.accountHasPublicKeyAttachment)
@@ -127,13 +133,19 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^user "([^"]*)" connects IMAP client "([^"]*)" on port (\d+)$`, s.userConnectsIMAPClientOnPort)
 	ctx.Step(`^user "([^"]*)" connects and authenticates IMAP client "([^"]*)"$`, s.userConnectsAndAuthenticatesIMAPClient)
 	ctx.Step(`^user "([^"]*)" connects and authenticates IMAP client "([^"]*)" with address "([^"]*)"$`, s.userConnectsAndAuthenticatesIMAPClientWithAddress)
+	ctx.Step(`^user "([^"]*)" connects and authenticates IMAP client "([^"]*)" with address "([^"]*)" using IMAP AUTHENTICATE$`, s.userConnectsAndAuthenticatesIMAPClientWithAddressUsingIMAPAuthenticate)
 	ctx.Step(`^user "([^"]*)" connects and can not authenticate IMAP client "([^"]*)" with address "([^"]*)"$`, s.userConnectsAndCanNotAuthenticateIMAPClientWithAddress)
 	ctx.Step(`^IMAP client "([^"]*)" can authenticate$`, s.imapClientCanAuthenticate)
+	ctx.Step(`^IMAP client "([^"]*)" can authenticate using IMAP AUTHENTICATE$`, s.imapClientCanAuthenticateUsingIMAPAuthenticate)
 	ctx.Step(`^IMAP client "([^"]*)" can authenticate with address "([^"]*)"$`, s.imapClientCanAuthenticateWithAddress)
+	ctx.Step(`^IMAP client "([^"]*)" can authenticate with address "([^"]*)" using IMAP AUTHENTICATE$`, s.imapClientCanAuthenticateWithAddressUsingIMAPAuthenticate)
 	ctx.Step(`^IMAP client "([^"]*)" cannot authenticate$`, s.imapClientCannotAuthenticate)
+	ctx.Step(`^IMAP client "([^"]*)" cannot authenticate using IMAP AUTHENTICATE$`, s.imapClientCannotAuthenticateUsingIMAPAuthenticate)
 	ctx.Step(`^IMAP client "([^"]*)" cannot authenticate with address "([^"]*)"$`, s.imapClientCannotAuthenticateWithAddress)
 	ctx.Step(`^IMAP client "([^"]*)" cannot authenticate with incorrect username$`, s.imapClientCannotAuthenticateWithIncorrectUsername)
+	ctx.Step(`^IMAP client "([^"]*)" cannot authenticate with incorrect username using IMAP AUTHENTICATE$`, s.imapClientCannotAuthenticateWithIncorrectUsernameUsingIMAPAuthenticate)
 	ctx.Step(`^IMAP client "([^"]*)" cannot authenticate with incorrect password$`, s.imapClientCannotAuthenticateWithIncorrectPassword)
+	ctx.Step(`^IMAP client "([^"]*)" cannot authenticate with incorrect password using IMAP AUTHENTICATE$`, s.imapClientCannotAuthenticateWithIncorrectPasswordUsingIMAPAuthenticate)
 	ctx.Step(`^IMAP client "([^"]*)" closes$`, s.imapClientCloses)
 	ctx.Step(`^IMAP client "([^"]*)" announces its ID with name "([^"]*)" and version "([^"]*)"$`, s.imapClientAnnouncesItsIDWithNameAndVersion)
 	ctx.Step(`^IMAP client "([^"]*)" creates "([^"]*)"$`, s.imapClientCreatesMailbox)
@@ -190,18 +202,19 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^SMTP client "([^"]*)" sends the following EML "([^"]*)" from "([^"]*)" to "([^"]*)"$`, s.smtpClientSendsTheFollowingEmlFromTo)
 	ctx.Step(`^SMTP client "([^"]*)" logs out$`, s.smtpClientLogsOut)
 
+	// ==== EXTERNAL ====
+	ctx.Step(`^external client deletes all messages`, s.externalClientDeletesAllMessages)
+	ctx.Step(`^external client sends the following message from "([^"]*)" to "([^"]*)":$`, s.externalClientSendsTheFollowingMessageFromTo)
+	ctx.Step(`^external client fetches the following message with subject "([^"]*)" and sender "([^"]*)" and state "([^"]*)"$`, s.externalClientFetchesTheFollowingMessage)
+	ctx.Step(`^external client fetches the following message with subject "([^"]*)" and sender "([^"]*)" and state "([^"]*)" with this structure:$`, s.externalClientSeesMessageWithStructure)
+
 	// ==== TELEMETRY ====
 	ctx.Step(`^bridge eventually sends the following heartbeat:$`, s.bridgeEventuallySendsTheFollowingHeartbeat)
 	ctx.Step(`^bridge needs to send heartbeat`, s.bridgeNeedsToSendHeartbeat)
+	ctx.Step(`^bridge needs to explicitly send heartbeat`, s.bridgeNeedsToSendExplicitHeartbeat)
+
 	ctx.Step(`^bridge do not need to send heartbeat`, s.bridgeDoNotNeedToSendHeartbeat)
 	ctx.Step(`^heartbeat is not whitelisted`, s.heartbeatIsNotwhitelisted)
-	ctx.Step(`^config status file exist for user "([^"]*)"$`, s.configStatusFileExistForUser)
-	ctx.Step(`^config status is pending for user "([^"]*)"$`, s.configStatusIsPendingForUser)
-	ctx.Step(`^config status is pending with failure for user "([^"]*)"$`, s.configStatusIsPendingWithFailureForUser)
-	ctx.Step(`^config status succeed for user "([^"]*)"$`, s.configStatusSucceedForUser)
-	ctx.Step(`^config status event "([^"]*)" is eventually send (\d+) time`, s.configStatusEventIsEventuallySendXTime)
-	ctx.Step(`^config status event "([^"]*)" is not send more than (\d+) time`, s.configStatusEventIsNotSendMoreThanXTime)
-	ctx.Step(`^force config status progress to be sent for user"([^"]*)"$`, s.forceConfigStatusProgressToBeSentForUser)
 
 	// ==== CONTACT ====
 	ctx.Step(`^user "([^"]*)" has contact "([^"]*)" with name "([^"]*)"$`, s.userHasContactWithName)
@@ -226,4 +239,14 @@ func (s *scenario) steps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the user with username "([^"]*)" sends all possible event loop message events observability metrics$`, s.eventLoopFailureMessageEventsObservability)
 	ctx.Step(`^the user with username "([^"]*)" sends all possible sync message building failure observability metrics$`, s.syncFailureMessageBuiltObservability)
 	ctx.Step(`^the user with username "([^"]*)" sends all possible sync message building success observability metrics$`, s.syncSuccessMessageBuiltObservability)
+	// SMTP metrics
+	ctx.Step(`^the user with username "([^"]*)" sends all possible SMTP error observability metrics$`, s.SMTPErrorObservabilityMetrics)
+	ctx.Step(`^the user with username "([^"]*)" sends SMTP send success observability metric$`, s.SMTPSendSuccessObservabilityMetric)
+	// SMTP submission metric
+	ctx.Step(`^the user with username "([^"]*)" sends an SMTP send request observability metric$`, s.SMTPSendRequestObservabilityMetric)
+
+	// Gluon related metrics
+	ctx.Step(`^the user with username "([^"]*)" sends all possible gluon error observability metrics$`, s.testGluonErrorObservabilityMetrics)
+	// Gluon metric - on newly opened IMAP connections exceeding threshold.
+	ctx.Step(`^the user with username "([^"]*)" sends a Gluon metric indicating that the number of newly opened IMAP connections within some interval have exceed a threshold value$`, s.GluonNewlyOpenedIMAPConnectionsExceedThreshold)
 }

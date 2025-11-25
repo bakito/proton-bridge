@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -31,8 +31,10 @@ import (
 	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/imapservice"
+	"github.com/ProtonMail/proton-bridge/v3/internal/services/observability"
 	bridgesmtp "github.com/ProtonMail/proton-bridge/v3/internal/services/smtp"
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice"
+	"github.com/ProtonMail/proton-bridge/v3/internal/unleash"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/cpc"
 	"github.com/emersion/go-smtp"
 	"github.com/sirupsen/logrus"
@@ -60,6 +62,9 @@ type Service struct {
 
 	uidValidityGenerator imap.UIDValidityGenerator
 	telemetry            Telemetry
+
+	observabilitySender observability.Sender
+	featureFlagProvider unleash.FeatureFlagValueProvider
 }
 
 func NewService(
@@ -71,6 +76,8 @@ func NewService(
 	reporter reporter.Reporter,
 	uidValidityGenerator imap.UIDValidityGenerator,
 	telemetry Telemetry,
+	observabilitySender observability.Sender,
+	featureFlagProvider unleash.FeatureFlagValueProvider,
 ) *Service {
 	return &Service{
 		requests:     cpc.NewCPC(),
@@ -85,6 +92,9 @@ func NewService(
 		tasks:                async.NewGroup(ctx, panicHandler),
 		uidValidityGenerator: uidValidityGenerator,
 		telemetry:            telemetry,
+
+		observabilitySender: observabilitySender,
+		featureFlagProvider: featureFlagProvider,
 	}
 }
 
@@ -164,6 +174,14 @@ func (sm *Service) SetGluonDir(ctx context.Context, gluonDir string) error {
 	return err
 }
 
+func (sm *Service) LogRemoteLabelIDs(ctx context.Context, provider imapservice.GluonIDProvider, addrID ...string) error {
+	_, err := sm.requests.Send(ctx, &smRequestLogRemoteMailboxIDs{
+		addrID:     addrID,
+		idProvider: provider,
+	})
+	return err
+}
+
 func (sm *Service) RemoveIMAPUser(ctx context.Context, deleteData bool, provider imapservice.GluonIDProvider, addrID ...string) error {
 	_, err := sm.requests.Send(ctx, &smRequestRemoveIMAPUser{
 		withData:   deleteData,
@@ -184,6 +202,22 @@ func (sm *Service) RemoveSMTPAccount(ctx context.Context, service *bridgesmtp.Se
 	_, err := sm.requests.Send(ctx, &smRequestRemoveSMTPAccount{account: service})
 
 	return err
+}
+
+func (sm *Service) GetUserMailboxByName(ctx context.Context, addrID string, mailboxName []string) (imap.MailboxData, error) {
+	return sm.imapServer.GetUserMailboxByName(ctx, addrID, mailboxName)
+}
+
+func (sm *Service) GetUserMailboxCountByInternalID(ctx context.Context, addrID string, internalID imap.InternalMailboxID) (int, error) {
+	return sm.imapServer.GetUserMailboxCountByInternalID(ctx, addrID, internalID)
+}
+
+func (sm *Service) GetOpenIMAPSessionCount() int {
+	return sm.imapServer.GetOpenSessionCount()
+}
+
+func (sm *Service) GetRollingIMAPConnectionCount() int {
+	return sm.imapServer.GetRollingIMAPConnectionCount()
 }
 
 func (sm *Service) run(ctx context.Context, subscription events.Subscription) {
@@ -237,6 +271,10 @@ func (sm *Service) run(ctx context.Context, subscription events.Subscription) {
 				if err == nil {
 					sm.handleLoadedUserCountChange(ctx)
 				}
+
+			case *smRequestLogRemoteMailboxIDs:
+				err := sm.logRemoteLabelIDsFromServer(ctx, r.addrID, r.idProvider)
+				request.Reply(ctx, nil, err)
 
 			case *smRequestRemoveIMAPUser:
 				err := sm.handleRemoveIMAPUser(ctx, r.withData, r.idProvider, r.addrID...)
@@ -303,6 +341,35 @@ func (sm *Service) handleAddIMAPUser(ctx context.Context,
 	// Due to the many different error exits, performer user count change at this stage rather we split the incrementing
 	// of users from the logic.
 	return sm.handleAddIMAPUserImpl(ctx, connector, addrID, idProvider, syncStateProvider)
+}
+
+func (sm *Service) logRemoteLabelIDsFromServer(ctx context.Context, addrIDs []string, idProvider imapservice.GluonIDProvider) error {
+	if sm.imapServer == nil {
+		return fmt.Errorf("no imap server instance running")
+	}
+
+	for _, addrID := range addrIDs {
+		gluonID, ok := idProvider.GetGluonID(addrID)
+		if !ok {
+			sm.log.Warnf("Could not find Gluon ID for addrID %v", addrID)
+			continue
+		}
+
+		log := sm.log.WithFields(logrus.Fields{
+			"addrID":  addrID,
+			"gluonID": gluonID,
+		})
+
+		remoteLabelIDs, err := sm.imapServer.GetAllMailboxRemoteIDsForUser(ctx, gluonID)
+		if err != nil {
+			log.WithError(err).Error("Could not obtain remote label IDs for user")
+			continue
+		}
+
+		log.WithField("remoteLabelIDs", remoteLabelIDs).Debug("Logging Gluon remote Label IDs")
+	}
+
+	return nil
 }
 
 func (sm *Service) handleAddIMAPUserImpl(ctx context.Context,
@@ -445,10 +512,13 @@ func (sm *Service) createIMAPServer(ctx context.Context) (*gluon.Server, error) 
 		sm.reporter,
 		sm.imapSettings.LogClient(),
 		sm.imapSettings.LogServer(),
+		sm.imapSettings.DisableIMAPAuthenticate(),
 		sm.imapSettings.EventPublisher(),
 		sm.tasks,
 		sm.uidValidityGenerator,
 		sm.panicHandler,
+		sm.observabilitySender,
+		sm.featureFlagProvider,
 	)
 	if err == nil {
 		sm.eventPublisher.PublishEvent(ctx, events.IMAPServerCreated{})
@@ -714,4 +784,9 @@ type smRequestAddSMTPAccount struct {
 
 type smRequestRemoveSMTPAccount struct {
 	account *bridgesmtp.Service
+}
+
+type smRequestLogRemoteMailboxIDs struct {
+	addrID     []string
+	idProvider imapservice.GluonIDProvider
 }

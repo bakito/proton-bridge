@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -25,6 +25,7 @@ import (
 
 	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/go-proton-api"
+	"github.com/ProtonMail/proton-bridge/v3/internal/sentry"
 	"github.com/bradenaw/juniper/xmaps"
 	"github.com/golang/mock/gomock"
 	"github.com/sirupsen/logrus"
@@ -74,8 +75,7 @@ func TestTask_NoStateAndSucceeds(t *testing.T) {
 	}
 
 	{
-		call1 := tt.updateApplier.EXPECT().SyncLabels(gomock.Any(), gomock.Eq(labels)).Times(1).Return(nil)
-		tt.updateApplier.EXPECT().SyncSystemLabelsOnly(gomock.Any(), gomock.Eq(labels)).After(call1).Times(1).Return(nil)
+		tt.updateApplier.EXPECT().SyncLabels(gomock.Any(), gomock.Eq(labels)).Times(2).Return(nil)
 	}
 
 	{
@@ -203,10 +203,17 @@ func TestTask_StateHasSyncedState(t *testing.T) {
 		}, nil
 	})
 
-	tt.updateApplier.EXPECT().SyncSystemLabelsOnly(gomock.Any(), gomock.Eq(labels)).Return(nil)
+	tt.updateApplier.EXPECT().SyncLabels(gomock.Any(), gomock.Eq(labels)).Return(nil)
 
 	err := tt.task.run(context.Background(), tt.syncReporter, labels, tt.updateApplier, tt.messageBuilder)
 	require.NoError(t, err)
+}
+
+type mockLabelConflictChecker struct {
+}
+
+func (m *mockLabelConflictChecker) CheckAndReportConflicts(_ context.Context, _ map[string]proton.Label) error {
+	return nil
 }
 
 func TestTask_RepeatsOnSyncFailure(t *testing.T) {
@@ -272,7 +279,7 @@ func TestTask_RepeatsOnSyncFailure(t *testing.T) {
 	tt.syncReporter.EXPECT().OnFinished(gomock.Any())
 	tt.syncReporter.EXPECT().OnProgress(gomock.Any(), gomock.Eq(MessageDelta))
 
-	tt.task.Execute(tt.syncReporter, labels, tt.updateApplier, tt.messageBuilder, time.Microsecond)
+	tt.task.Execute(tt.syncReporter, labels, tt.updateApplier, tt.messageBuilder, time.Microsecond, &mockLabelConflictChecker{})
 	require.NoError(t, <-tt.task.OnSyncFinishedCH())
 }
 
@@ -343,7 +350,7 @@ func newTestHandler(mockCtrl *gomock.Controller, userID string) thandler { // no
 	client := NewMockAPIClient(mockCtrl)
 	messageBuilder := NewMockMessageBuilder(mockCtrl)
 	syncReporter := NewMockReporter(mockCtrl)
-	task := NewHandler(regulator, client, userID, syncState, logrus.WithField("test", "test"), &async.NoopPanicHandler{})
+	task := NewHandler(regulator, client, userID, syncState, logrus.WithField("test", "test"), &async.NoopPanicHandler{}, sentry.NullSentryReporter{})
 
 	return thandler{
 		task:           task,

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -18,7 +18,7 @@
 package observability
 
 import (
-	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ProtonMail/gluon/async"
@@ -26,26 +26,32 @@ import (
 )
 
 const genericHeartbeatSchemaName = "bridge_generic_user_heartbeat_total"
+const genericHeartbeatVersion = 2
 
 type heartbeatData struct {
 	receivedSyncError      bool
 	receivedEventLoopError bool
 	receivedOtherError     bool
+	receivedGluonError     bool
 }
 
 func (d *distinctionUtility) resetHeartbeatData() {
 	d.heartbeatData.receivedSyncError = false
 	d.heartbeatData.receivedOtherError = false
 	d.heartbeatData.receivedEventLoopError = false
+	d.heartbeatData.receivedGluonError = false
 }
 
-func (d *distinctionUtility) updateHeartbeatData(errType DistinctionErrorTypeEnum) {
+func (d *distinctionUtility) updateHeartbeatData(errType DistinctionMetricTypeEnum) {
 	d.withUpdateHeartbeatDataLock(func() {
+		//nolint:exhaustive
 		switch errType {
 		case SyncError:
 			d.heartbeatData.receivedSyncError = true
 		case EventLoopError:
 			d.heartbeatData.receivedEventLoopError = true
+		case GluonMessageError, GluonImapError, GluonOtherError:
+			d.heartbeatData.receivedGluonError = true
 		}
 	})
 }
@@ -81,10 +87,6 @@ func (d *distinctionUtility) sendHeartbeat() {
 	})
 }
 
-func formatBool(value bool) string {
-	return fmt.Sprintf("%t", value)
-}
-
 // generateHeartbeatUserMetric creates the heartbeat user metric and includes the relevant data.
 func (d *distinctionUtility) generateHeartbeatUserMetric() proton.ObservabilityMetric {
 	return generateHeartbeatMetric(
@@ -92,16 +94,17 @@ func (d *distinctionUtility) generateHeartbeatUserMetric() proton.ObservabilityM
 		d.getEmailClientUserAgent(),
 		getEnabled(d.settingsGetter.GetProxyAllowed()),
 		getEnabled(d.getBetaAccessEnabled()),
-		formatBool(d.heartbeatData.receivedOtherError),
-		formatBool(d.heartbeatData.receivedSyncError),
-		formatBool(d.heartbeatData.receivedEventLoopError),
+		strconv.FormatBool(d.heartbeatData.receivedOtherError),
+		strconv.FormatBool(d.heartbeatData.receivedSyncError),
+		strconv.FormatBool(d.heartbeatData.receivedEventLoopError),
+		strconv.FormatBool(d.heartbeatData.receivedGluonError),
 	)
 }
 
-func generateHeartbeatMetric(plan, mailClient, dohEnabled, betaAccess, otherError, syncError, eventLoopError string) proton.ObservabilityMetric {
+func generateHeartbeatMetric(plan, mailClient, dohEnabled, betaAccess, otherError, syncError, eventLoopError, gluonError string) proton.ObservabilityMetric {
 	return proton.ObservabilityMetric{
 		Name:      genericHeartbeatSchemaName,
-		Version:   1,
+		Version:   genericHeartbeatVersion,
 		Timestamp: time.Now().Unix(),
 		Data: map[string]interface{}{
 			"Value": 1,
@@ -113,6 +116,7 @@ func generateHeartbeatMetric(plan, mailClient, dohEnabled, betaAccess, otherErro
 				"receivedOtherError":     otherError,
 				"receivedSyncError":      syncError,
 				"receivedEventLoopError": eventLoopError,
+				"receivedGluonError":     gluonError,
 			},
 		},
 	}

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -33,6 +33,8 @@ public: // member functions.
 
     bool useSoftwareRenderer() const; ///< Get the 'Use software renderer' settings value.
     void setUseSoftwareRenderer(bool value); ///< Set the 'Use software renderer' settings value.
+    void setTrayIconVisible(bool value);  ///< Get the 'Tray icon visible' setting value.
+    bool trayIconVisible() const; ///< Set the 'Tray icon visible' setting value.
 
 private: // member functions.
     Settings(); ///< Default constructor.

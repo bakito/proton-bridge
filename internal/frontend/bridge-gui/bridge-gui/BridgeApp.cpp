@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -29,7 +29,7 @@ using namespace bridgepp;
 //****************************************************************************************************************************************************
 BridgeApp::BridgeApp(int &argc, char **argv)
     : QApplication(argc, argv) {
-
+        setAttribute(Qt::AA_DontShowIconsInMenus, false);
 }
 
 

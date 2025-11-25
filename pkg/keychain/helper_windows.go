@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -25,7 +25,7 @@ import (
 
 const WindowsCredentials = "windows-credentials"
 
-func listHelpers(_ bool) (Helpers, string) {
+func listHelpers() (Helpers, string) {
 	helpers := make(Helpers)
 	// Windows always provides a keychain.
 	if isUsable(newWinCredHelper("")) {

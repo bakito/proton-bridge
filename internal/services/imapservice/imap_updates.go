@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -102,6 +102,16 @@ func newMailboxCreatedUpdate(labelID imap.MailboxID, labelName []string) *imap.M
 	})
 }
 
+func newMailboxUpdatedOrCreated(labelID imap.MailboxID, labelName []string) *imap.MailboxUpdatedOrCreated {
+	return imap.NewMailboxUpdatedOrCreated(imap.Mailbox{
+		ID:             labelID,
+		Name:           labelName,
+		Flags:          defaultMailboxFlags(),
+		PermanentFlags: defaultMailboxPermanentFlags(),
+		Attributes:     imap.NewFlagSet(),
+	})
+}
+
 func GetMailboxName(label proton.Label) []string {
 	var name []string
 
@@ -112,13 +122,23 @@ func GetMailboxName(label proton.Label) []string {
 	case proton.LabelTypeLabel:
 		name = append([]string{labelPrefix}, label.Path...)
 
-	case proton.LabelTypeContactGroup:
-		fallthrough
 	case proton.LabelTypeSystem:
+		name = []string{label.Name}
+
+	case proton.LabelTypeContactGroup:
 		fallthrough
 	default:
 		name = label.Path
 	}
 
 	return name
+}
+
+func nameWithTempPrefix(path []string) []string {
+	path[len(path)-1] = "tmp_" + path[len(path)-1]
+	return path
+}
+
+func getMailboxNameWithTempPrefix(label proton.Label) []string {
+	return nameWithTempPrefix(GetMailboxName(label))
 }

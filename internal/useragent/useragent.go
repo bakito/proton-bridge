@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -42,9 +43,12 @@ func New() *UserAgent {
 }
 
 func (ua *UserAgent) SetClient(name, version string) {
+	if strings.EqualFold("Mac OS X Notes", name) {
+		return
+	}
+
 	ua.lock.Lock()
 	defer ua.lock.Unlock()
-
 	ua.client = fmt.Sprintf("%v/%v", name, regexp.MustCompile(`(.*) \((.*)\)`).ReplaceAllString(version, "$1-$2"))
 }
 

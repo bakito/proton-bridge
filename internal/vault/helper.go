@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -63,6 +63,10 @@ func GetHelper(vaultDir string) (string, error) {
 }
 
 func SetHelper(vaultDir, helper string) error {
+	if helper == "" {
+		return nil
+	}
+
 	settings, err := LoadKeychainSettings(vaultDir)
 	if err != nil {
 		return err

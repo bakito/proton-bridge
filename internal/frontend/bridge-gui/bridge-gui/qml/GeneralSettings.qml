@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -86,9 +86,9 @@ SettingsView {
         ColorImage {
             Layout.alignment: Qt.AlignCenter
             color: root.colorScheme.interaction_norm
-            height: root.colorScheme.body_font_size
+            height: ProtonStyle.body_font_size
             source: root._isAdvancedShown ? "/qml/icons/ic-chevron-down.svg" : "/qml/icons/ic-chevron-right.svg"
-            sourceSize.height: root.colorScheme.body_font_size
+            sourceSize.height: ProtonStyle.body_font_size
 
             MouseArea {
                 anchors.fill: parent
@@ -146,6 +146,19 @@ SettingsView {
         visible: root._isAdvancedShown
 
         onClicked: Backend.changeColorScheme(darkMode.checked ? "light" : "dark")
+    }
+    SettingsItem {
+        id: trayIconVisible
+        Layout.fillWidth: true
+        checked: Backend.trayIconVisible
+        colorScheme: root.colorScheme
+        description: qsTr("Show the Bridge icon in the menu bar. When the Bridge icon is not visible, launch the " +
+        "application again to display the main window.")
+        text: qsTr("Show the Bridge icon in the menu bar")
+        type: SettingsItem.Toggle
+        visible: (Backend.goos === "darwin") && root._isAdvancedShown
+
+        onClicked: Backend.trayIconVisible = !trayIconVisible.checked
     }
     SettingsItem {
         id: allMail

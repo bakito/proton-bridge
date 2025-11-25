@@ -54,6 +54,9 @@ func NewMocks(tb testing.TB, version, minAuto *semver.Version) *Mocks {
 	mocks.Heartbeat.EXPECT().IsTelemetryAvailable(gomock.Any()).AnyTimes()
 	mocks.Heartbeat.EXPECT().GetHeartbeatPeriodicInterval().AnyTimes().Return(500 * time.Millisecond)
 
+	// It's called whenever a context is cancelled during sync. We should ought to remove this and make it more granular in the future.
+	mocks.Reporter.EXPECT().ReportMessageWithContext("Failed to sync, will retry later", gomock.Any()).AnyTimes()
+
 	return mocks
 }
 
@@ -119,13 +122,14 @@ func (provider *TestLocationsProvider) UserCache() string {
 }
 
 type TestUpdater struct {
-	latest updater.VersionInfo
-	lock   sync.RWMutex
+	latest   updater.VersionInfoLegacy
+	releases updater.VersionInfo
+	lock     sync.RWMutex
 }
 
 func NewTestUpdater(version, minAuto *semver.Version) *TestUpdater {
 	return &TestUpdater{
-		latest: updater.VersionInfo{
+		latest: updater.VersionInfoLegacy{
 			Version: version,
 			MinAuto: minAuto,
 
@@ -134,11 +138,11 @@ func NewTestUpdater(version, minAuto *semver.Version) *TestUpdater {
 	}
 }
 
-func (testUpdater *TestUpdater) SetLatestVersion(version, minAuto *semver.Version) {
+func (testUpdater *TestUpdater) SetLatestVersionLegacy(version, minAuto *semver.Version) {
 	testUpdater.lock.Lock()
 	defer testUpdater.lock.Unlock()
 
-	testUpdater.latest = updater.VersionInfo{
+	testUpdater.latest = updater.VersionInfoLegacy{
 		Version: version,
 		MinAuto: minAuto,
 
@@ -146,17 +150,35 @@ func (testUpdater *TestUpdater) SetLatestVersion(version, minAuto *semver.Versio
 	}
 }
 
-func (testUpdater *TestUpdater) GetVersionInfo(_ context.Context, _ updater.Downloader, _ updater.Channel) (updater.VersionInfo, error) {
+func (testUpdater *TestUpdater) GetVersionInfoLegacy(_ context.Context, _ updater.Downloader, _ updater.Channel) (updater.VersionInfoLegacy, error) {
 	testUpdater.lock.RLock()
 	defer testUpdater.lock.RUnlock()
 
 	return testUpdater.latest, nil
 }
 
-func (testUpdater *TestUpdater) InstallUpdate(_ context.Context, _ updater.Downloader, _ updater.VersionInfo) error {
+func (testUpdater *TestUpdater) InstallUpdateLegacy(_ context.Context, _ updater.Downloader, _ updater.VersionInfoLegacy) error {
 	return nil
 }
 
 func (testUpdater *TestUpdater) RemoveOldUpdates() error {
+	return nil
+}
+
+func (testUpdater *TestUpdater) SetLatestVersion(releases updater.VersionInfo) {
+	testUpdater.lock.Lock()
+	defer testUpdater.lock.Unlock()
+
+	testUpdater.releases = releases
+}
+
+func (testUpdater *TestUpdater) GetVersionInfo(_ context.Context, _ updater.Downloader) (updater.VersionInfo, error) {
+	testUpdater.lock.RLock()
+	defer testUpdater.lock.RUnlock()
+
+	return testUpdater.releases, nil
+}
+
+func (testUpdater *TestUpdater) InstallUpdate(_ context.Context, _ updater.Downloader, _ updater.Release) error {
 	return nil
 }

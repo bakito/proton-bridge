@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -75,17 +75,21 @@ const (
 
 	flagLogIMAP = "log-imap"
 	flagLogSMTP = "log-smtp"
+
+	flagEnableKeychainTest  = "enable-keychain-test"
+	flagDisableKeychainTest = "disable-keychain-test"
+
+	flagSoftwareRenderer    = "software-renderer"
+	flagSetSoftwareRenderer = "set-software-renderer"
+	flagSetHardwareRenderer = "set-hardware-renderer"
 )
 
 // Hidden flags.
 const (
-	flagLauncher            = "launcher"
-	flagNoWindow            = "no-window"
-	flagParentPID           = "parent-pid"
-	flagSoftwareRenderer    = "software-renderer"
-	flagEnableKeychainTest  = "enable-keychain-test"
-	flagDisableKeychainTest = "disable-keychain-test"
-	FlagSessionID           = "session-id"
+	flagLauncher  = "launcher"
+	flagNoWindow  = "no-window"
+	flagParentPID = "parent-pid"
+	FlagSessionID = "session-id"
 )
 
 const (
@@ -93,18 +97,21 @@ const (
 	appShortName = "bridge"
 )
 
+// the two flags below have been deprecated by BRIDGE-281. We however keep them so that bridge does not error if they are passed on startup.
 var cliFlagEnableKeychainTest = &cli.BoolFlag{ //nolint:gochecknoglobals
-	Name:   flagEnableKeychainTest,
-	Usage:  "Enable the keychain test",
-	Hidden: true,
-	Value:  false,
-} //nolint:gochecknoglobals
+	Name:               flagEnableKeychainTest,
+	Usage:              "This flag is deprecated and does nothing",
+	Value:              false,
+	DisableDefaultText: true,
+	Hidden:             true,
+}
 
 var cliFlagDisableKeychainTest = &cli.BoolFlag{ //nolint:gochecknoglobals
-	Name:   flagDisableKeychainTest,
-	Usage:  "Disable the keychain test",
-	Hidden: true,
-	Value:  false,
+	Name:               flagDisableKeychainTest,
+	Usage:              "This flag is deprecated and does nothing",
+	Value:              false,
+	DisableDefaultText: true,
+	Hidden:             true,
 }
 
 func New() *cli.App {
@@ -156,6 +163,24 @@ func New() *cli.App {
 			Name:  flagLogSMTP,
 			Usage: "Enable logging of SMTP communications (may contain decrypted data!)",
 		},
+		&cli.BoolFlag{
+			Name:               flagSoftwareRenderer, // This flag is ignored by bridge, but should be passed to launcher in case of restart, so it need to be accepted by the CLI parser.
+			Usage:              "Use software rendering of the GUI for the current execution of the application",
+			Value:              false,
+			DisableDefaultText: true,
+		},
+		&cli.BoolFlag{
+			Name:               flagSetSoftwareRenderer, // This flag is ignored by bridge, we just want it to be shown in the help (BRIDGE-217).
+			Usage:              "Toggle software rendering of the GUI for the current and future executions of the application",
+			Value:              false,
+			DisableDefaultText: true,
+		},
+		&cli.BoolFlag{
+			Name:               flagSetHardwareRenderer, // This flag is ignored by bridge, we just want it to be shown in the help (BRIDGE-217).
+			Usage:              "Toggle hardware rendering of the GUI for the current and future executions of the application",
+			Value:              false,
+			DisableDefaultText: true,
+		},
 
 		// Hidden flags
 		&cli.BoolFlag{
@@ -174,19 +199,24 @@ func New() *cli.App {
 			Hidden: true,
 			Value:  -1,
 		},
-		&cli.BoolFlag{
-			Name:   flagSoftwareRenderer, // This flag is ignored by bridge, but should be passed to launcher in case of restart, so it need to be accepted by the CLI parser.
-			Usage:  "GUI is using software renderer",
-			Hidden: true,
-			Value:  false,
-		},
 		&cli.StringFlag{
 			Name:   FlagSessionID,
 			Hidden: true,
 		},
-		// the two flags below were introduced by BRIDGE-116
-		cliFlagEnableKeychainTest,
-		cliFlagDisableKeychainTest,
+	}
+
+	// We override the default help value because we want "Show" to be capitalized
+	cli.HelpFlag = &cli.BoolFlag{
+		Name:               "help",
+		Aliases:            []string{"h"},
+		Usage:              "Show help",
+		DisableDefaultText: true,
+	}
+
+	if onMacOS() {
+		// The two flags below were introduced for BRIDGE-116, and are available only on macOS.
+		// They have been later removed fro BRIDGE-281.
+		app.Flags = append(app.Flags, cliFlagEnableKeychainTest, cliFlagDisableKeychainTest)
 	}
 
 	app.Action = run
@@ -257,10 +287,9 @@ func run(c *cli.Context) error {
 
 						return withSingleInstance(settings, locations.GetLockFile(), version, func() error {
 							// Look for available keychains
-							skipKeychainTest := checkSkipKeychainTest(c, settings)
-							return WithKeychainList(crashHandler, skipKeychainTest, func(keychains *keychain.List) error {
+							return WithKeychainList(crashHandler, func(keychains *keychain.List) error {
 								// Unlock the encrypted vault.
-								return WithVault(locations, keychains, crashHandler, func(v *vault.Vault, insecure, corrupt bool) error {
+								return WithVault(reporter, locations, keychains, crashHandler, func(v *vault.Vault, insecure, corrupt bool) error {
 									if !v.Migrated() {
 										// Migrate old settings into the vault.
 										if err := migrateOldSettings(v); err != nil {
@@ -522,11 +551,11 @@ func withCookieJar(vault *vault.Vault, fn func(http.CookieJar) error) error {
 }
 
 // WithKeychainList init the list of usable keychains.
-func WithKeychainList(panicHandler async.PanicHandler, skipKeychainTest bool, fn func(*keychain.List) error) error {
+func WithKeychainList(panicHandler async.PanicHandler, fn func(*keychain.List) error) error {
 	logrus.Debug("Creating keychain list")
 	defer logrus.Debug("Keychain list stop")
 	defer async.HandlePanic(panicHandler)
-	return fn(keychain.NewList(skipKeychainTest))
+	return fn(keychain.NewList())
 }
 
 func setDeviceCookies(jar *cookies.Jar) error {
@@ -547,34 +576,6 @@ func setDeviceCookies(jar *cookies.Jar) error {
 	return nil
 }
 
-func checkSkipKeychainTest(c *cli.Context, settingsDir string) bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-
-	enable := c.Bool(flagEnableKeychainTest)
-	disable := c.Bool(flagDisableKeychainTest)
-
-	skip, err := vault.GetShouldSkipKeychainTest(settingsDir)
-	if err != nil {
-		logrus.WithError(err).Error("Could not load keychain settings.")
-	}
-
-	if (!enable) && (!disable) {
-		return skip
-	}
-
-	// if both switches are passed, 'enable' has priority
-	if disable {
-		skip = true
-	}
-	if enable {
-		skip = false
-	}
-
-	if err := vault.SetShouldSkipKeychainTest(settingsDir, skip); err != nil {
-		logrus.WithError(err).Error("Could not save keychain settings.")
-	}
-
-	return skip
+func onMacOS() bool {
+	return runtime.GOOS == "darwin"
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -31,7 +31,7 @@ const (
 	SecretServiceDBus = "secret-service-dbus"
 )
 
-func listHelpers(_ bool) (Helpers, string) {
+func listHelpers() (Helpers, string) {
 	helpers := make(Helpers)
 
 	if isUsable(newDBusHelper("")) {

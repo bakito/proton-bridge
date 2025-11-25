@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -103,9 +103,4 @@ func TestMatchUserAgent(t *testing.T) {
 	for _, testCase := range testCases {
 		require.Equal(t, testCase.result, matchUserAgent(testCase.agent))
 	}
-}
-
-func TestFormatBool(t *testing.T) {
-	require.Equal(t, "false", formatBool(false))
-	require.Equal(t, "true", formatBool(true))
 }

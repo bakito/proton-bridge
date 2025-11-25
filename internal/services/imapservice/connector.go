@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -31,6 +31,7 @@ import (
 	"github.com/ProtonMail/gluon/connector"
 	"github.com/ProtonMail/gluon/imap"
 	"github.com/ProtonMail/gluon/reporter"
+	"github.com/ProtonMail/gluon/rfc5322"
 	"github.com/ProtonMail/gluon/rfc822"
 	"github.com/ProtonMail/go-proton-api"
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
@@ -44,6 +45,10 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+type mailboxCountProvider interface {
+	GetUserMailboxCountByInternalID(ctx context.Context, addrID string, internalID imap.InternalMailboxID) (int, error)
+}
+
 // Connector contains all IMAP state required to satisfy sync and or imap queries.
 type Connector struct {
 	addrID      string
@@ -55,7 +60,6 @@ type Connector struct {
 
 	identityState sharedIdentity
 	client        APIClient
-	telemetry     Telemetry
 	reporter      reporter.Reporter
 	panicHandler  async.PanicHandler
 	sendRecorder  *sendrecorder.SendRecorder
@@ -67,7 +71,11 @@ type Connector struct {
 
 	sharedCache *SharedCache
 	syncState   *SyncState
+
+	mailboxCountProvider mailboxCountProvider
 }
+
+var errNoSenderAddressMatch = errors.New("no matching sender found in address list")
 
 func NewConnector(
 	addrID string,
@@ -77,10 +85,10 @@ func NewConnector(
 	addressMode usertypes.AddressMode,
 	sendRecorder *sendrecorder.SendRecorder,
 	panicHandler async.PanicHandler,
-	telemetry Telemetry,
 	reporter reporter.Reporter,
 	showAllMail bool,
 	syncState *SyncState,
+	mailboxCountProvider mailboxCountProvider,
 ) *Connector {
 	userID := identityState.UserID()
 
@@ -93,7 +101,6 @@ func NewConnector(
 		attrs:         defaultMailboxAttributes(),
 
 		client:       apiClient,
-		telemetry:    telemetry,
 		reporter:     reporter,
 		panicHandler: panicHandler,
 		sendRecorder: sendRecorder,
@@ -107,6 +114,7 @@ func NewConnector(
 		labels:      labels,
 		addressMode: addressMode,
 		log: logrus.WithFields(logrus.Fields{
+			"pkg":             "imapservice",
 			"gluon-connector": addressMode,
 			"addr-id":         addrID,
 			"user-id":         userID,
@@ -114,6 +122,8 @@ func NewConnector(
 
 		sharedCache: NewSharedCached(),
 		syncState:   syncState,
+
+		mailboxCountProvider: mailboxCountProvider,
 	}
 }
 
@@ -165,18 +175,15 @@ func (s *Connector) Init(ctx context.Context, cache connector.IMAPState) error {
 	})
 }
 
-func (s *Connector) Authorize(ctx context.Context, username string, password []byte) bool {
+func (s *Connector) Authorize(_ context.Context, username string, password []byte) bool {
 	addrID, err := s.identityState.CheckAuth(username, password)
 	if err != nil {
-		s.telemetry.ReportConfigStatusFailure("IMAP " + err.Error())
 		return false
 	}
 
 	if s.addressMode == usertypes.AddressModeSplit && addrID != s.addrID {
 		return false
 	}
-
-	s.telemetry.SendConfigStatusSuccess(ctx)
 
 	return true
 }
@@ -259,7 +266,7 @@ func (s *Connector) DeleteMailbox(ctx context.Context, _ connector.IMAPStateWrit
 	wLabels := s.labels.Write()
 	defer wLabels.Close()
 
-	wLabels.Delete(string(mboxID))
+	wLabels.Delete(string(mboxID), "connectorDeleteMailbox")
 
 	return nil
 }
@@ -557,7 +564,7 @@ func (s *Connector) createLabel(ctx context.Context, name []string) (imap.Mailbo
 	wLabels := s.labels.Write()
 	defer wLabels.Close()
 
-	wLabels.SetLabel(label.ID, label)
+	wLabels.SetLabel(label.ID, label, "connectorCreateLabel")
 
 	return toIMAPMailbox(label, s.flags, s.permFlags, s.attrs), nil
 }
@@ -595,7 +602,7 @@ func (s *Connector) createFolder(ctx context.Context, name []string) (imap.Mailb
 	}
 
 	// Add label to list so subsequent sub folder create requests work correct.
-	wLabels.SetLabel(label.ID, label)
+	wLabels.SetLabel(label.ID, label, "connectorCreateFolder")
 
 	return toIMAPMailbox(label, s.flags, s.permFlags, s.attrs), nil
 }
@@ -621,7 +628,7 @@ func (s *Connector) updateLabel(ctx context.Context, labelID imap.MailboxID, nam
 	wLabels := s.labels.Write()
 	defer wLabels.Close()
 
-	wLabels.SetLabel(label.ID, update)
+	wLabels.SetLabel(label.ID, update, "connectorUpdateLabel")
 
 	return nil
 }
@@ -662,7 +669,7 @@ func (s *Connector) updateFolder(ctx context.Context, labelID imap.MailboxID, na
 		return err
 	}
 
-	wLabels.SetLabel(label.ID, update)
+	wLabels.SetLabel(label.ID, update, "connectorUpdateFolder")
 
 	return nil
 }
@@ -676,20 +683,18 @@ func (s *Connector) importMessage(
 ) (imap.Message, []byte, error) {
 	var full proton.FullMessage
 
-	// addr is primary for combined mode or active for split mode
-	addr, ok := s.identityState.GetAddress(s.addrID)
-	if !ok {
-		return imap.Message{}, nil, fmt.Errorf("could not find address")
-	}
-
 	p, err2 := parser.New(bytes.NewReader(literal))
 	if err2 != nil {
 		return imap.Message{}, nil, fmt.Errorf("failed to parse literal: %w", err2)
 	}
 
 	isDraft := slices.Contains(labelIDs, proton.DraftsLabel)
+	addr, err := getImportAddress(p, isDraft, s.addrID, s)
+	if err != nil {
+		return imap.Message{}, nil, err
+	}
 
-	if err := s.identityState.WithAddrKR(s.addrID, func(_, addrKR *crypto.KeyRing) error {
+	if err := s.identityState.WithAddrKR(addr.ID, func(_, addrKR *crypto.KeyRing) error {
 		primaryKey, errKey := addrKR.FirstKey()
 		if errKey != nil {
 			return fmt.Errorf("failed to get primary key for import: %w", errKey)
@@ -716,7 +721,7 @@ func (s *Connector) importMessage(
 			}
 			str, err := s.client.ImportMessages(ctx, primaryKey, 1, 1, []proton.ImportReq{{
 				Metadata: proton.ImportMetadata{
-					AddressID: s.addrID,
+					AddressID: addr.ID,
 					LabelIDs:  labelIDs,
 					Unread:    proton.Bool(unread),
 					Flags:     flags,
@@ -804,8 +809,10 @@ func (s *Connector) createDraftWithParser(ctx context.Context, parser *parser.Pa
 	return draft, nil
 }
 
-func (s *Connector) publishUpdate(_ context.Context, update imap.Update) {
-	s.updateCh.Enqueue(update)
+func (s *Connector) publishUpdate(_ context.Context, updates ...imap.Update) {
+	for _, update := range updates {
+		s.updateCh.Enqueue(update)
+	}
 }
 
 func fixGODT3003Labels(
@@ -873,4 +880,50 @@ func stripPlusAlias(a string) string {
 
 func equalAddresses(a, b string) bool {
 	return strings.EqualFold(stripPlusAlias(a), stripPlusAlias(b))
+}
+
+func (s *Connector) getSenderProtonAddress(p *parser.Parser) (proton.Address, error) {
+	// Step 1: extract sender email address from message
+	if (p == nil) || (p.Root() == nil) || (p.Root().Header.Len() == 0) {
+		return proton.Address{}, errors.New("invalid message encountered while trying to extract sender address")
+	}
+
+	addrField := p.Root().Header.Get("From")
+	if len(addrField) == 0 {
+		addrField = p.Root().Header.Get("Sender")
+	}
+	if len(addrField) == 0 {
+		return proton.Address{}, errors.New("no sender found in message headers")
+	}
+
+	sender, err := rfc5322.ParseAddressList(addrField)
+	if (err != nil) || (len(sender) == 0) {
+		return proton.Address{}, fmt.Errorf("invalid sender address in message: %w", err)
+	}
+
+	addrStr := sender[0].Address
+
+	// Step 2: match email with the user address list.
+	addressList := s.identityState.GetAddresses()
+	index := slices.IndexFunc(addressList, func(a proton.Address) bool {
+		return equalAddresses(a.Email, addrStr)
+	})
+	if index < 0 {
+		return proton.Address{}, errNoSenderAddressMatch
+	}
+
+	return addressList[index], nil
+}
+
+func (s *Connector) SetAddrIDTest(addrID string) {
+	s.addrID = addrID
+}
+
+func (s *Connector) GetMailboxMessageCount(ctx context.Context, mailboxInternalID imap.InternalMailboxID) (int, error) {
+	return s.mailboxCountProvider.GetUserMailboxCountByInternalID(ctx, s.addrID, mailboxInternalID)
+}
+
+// SetMailboxCountProviderTest - sets the relevant provider. Should only be used for testing.
+func (s *Connector) SetMailboxCountProviderTest(provider mailboxCountProvider) {
+	s.mailboxCountProvider = provider
 }

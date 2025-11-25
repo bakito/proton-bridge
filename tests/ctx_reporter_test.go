@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -89,8 +89,11 @@ func (r *reportRecorder) close() {
 }
 
 func (r *reportRecorder) assertEmpty() {
-	if !r.skipAssert {
-		r.assert.Empty(r.reports)
+	if !r.skipAssert && len(r.reports) > 0 {
+		for _, report := range r.reports {
+			// Sentry reports with failed syncs are expected, mostly due to sync context cancellations.
+			r.assert.Equal(report.message, "Failed to sync, will retry later")
+		}
 	}
 }
 
@@ -139,6 +142,11 @@ func (r *reportRecorder) ReportMessage(message string) error {
 }
 
 func (r *reportRecorder) ReportMessageWithContext(message string, context reporter.Context) error {
+	r.add(false, message, context)
+	return nil
+}
+
+func (r *reportRecorder) ReportWarningWithContext(message string, context reporter.Context) error {
 	r.add(false, message, context)
 	return nil
 }

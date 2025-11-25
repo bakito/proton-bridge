@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -361,10 +361,9 @@ func newTestService(_ *testing.T, mockCtrl *gomock.Controller) (*Service, *mocks
 	eventPublisher := mocks2.NewMockEventPublisher(mockCtrl)
 	provider := mocks.NewMockIdentityProvider(mockCtrl)
 	user := newTestUser()
-	telemetry := mocks.NewMockTelemetry(mockCtrl)
 	bridgePassProvider := NewFixedBridgePassProvider([]byte("hello"))
 
-	service := NewService(subscribable, eventPublisher, NewState(*user, newTestAddresses(), provider), bridgePassProvider, telemetry)
+	service := NewService(subscribable, eventPublisher, NewState(*user, newTestAddresses(), provider), bridgePassProvider)
 	return service, eventPublisher, provider
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -36,6 +36,7 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice"
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/userevents"
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/useridentity"
+	"github.com/ProtonMail/proton-bridge/v3/internal/unleash"
 	"github.com/ProtonMail/proton-bridge/v3/internal/usertypes"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/cpc"
 	"github.com/sirupsen/logrus"
@@ -45,12 +46,6 @@ import (
 type EventProvider interface {
 	userevents.Subscribable
 	RewindEventID(ctx context.Context, eventID string) error
-}
-
-type Telemetry interface {
-	useridentity.Telemetry
-	SendConfigStatusSuccess(ctx context.Context)
-	ReportConfigStatusFailure(errDetails string)
 }
 
 type GluonIDProvider interface {
@@ -77,7 +72,6 @@ type Service struct {
 	serverManager   IMAPServerManager
 	eventPublisher  events.EventPublisher
 
-	telemetry    Telemetry
 	panicHandler async.PanicHandler
 	sendRecorder *sendrecorder.SendRecorder
 	reporter     reporter.Reporter
@@ -98,7 +92,9 @@ type Service struct {
 	lastHandledEventID string
 	isSyncing          atomic.Bool
 
-	observabilitySender observability.Sender
+	observabilitySender  observability.Sender
+	labelConflictManager *LabelConflictManager
+	LabelConflictChecker *LabelConflictChecker
 }
 
 func NewService(
@@ -112,7 +108,6 @@ func NewService(
 	keyPassProvider useridentity.KeyPassProvider,
 	panicHandler async.PanicHandler,
 	sendRecorder *sendrecorder.SendRecorder,
-	telemetry Telemetry,
 	reporter reporter.Reporter,
 	addressMode usertypes.AddressMode,
 	subscription events.Subscription,
@@ -120,6 +115,7 @@ func NewService(
 	maxSyncMemory uint64,
 	showAllMail bool,
 	observabilitySender observability.Sender,
+	featureFlagProvider unleash.FeatureFlagValueProvider,
 ) *Service {
 	subscriberName := fmt.Sprintf("imap-%v", identityState.User.ID)
 
@@ -129,11 +125,12 @@ func NewService(
 	})
 	rwIdentity := newRWIdentity(identityState, bridgePassProvider, keyPassProvider)
 
-	syncUpdateApplier := NewSyncUpdateApplier()
+	labelConflictManager := NewLabelConflictManager(serverManager, gluonIDProvider, client, reporter, featureFlagProvider)
+	syncUpdateApplier := NewSyncUpdateApplier(labelConflictManager)
 	syncMessageBuilder := NewSyncMessageBuilder(rwIdentity)
 	syncReporter := newSyncReporter(identityState.User.ID, eventPublisher, time.Second)
 
-	return &Service{
+	service := &Service{
 		cpc:           cpc.NewCPC(),
 		client:        client,
 		log:           log,
@@ -150,7 +147,6 @@ func NewService(
 
 		panicHandler: panicHandler,
 		sendRecorder: sendRecorder,
-		telemetry:    telemetry,
 		reporter:     reporter,
 
 		connectors:    make(map[string]*Connector),
@@ -165,8 +161,12 @@ func NewService(
 		syncReporter:       syncReporter,
 		syncConfigPath:     GetSyncConfigPath(syncConfigDir, identityState.User.ID),
 
-		observabilitySender: observabilitySender,
+		observabilitySender:  observabilitySender,
+		labelConflictManager: labelConflictManager,
 	}
+
+	service.LabelConflictChecker = NewConflictChecker(service, reporter, gluonIDProvider, serverManager)
+	return service
 }
 
 func (s *Service) Start(
@@ -185,7 +185,14 @@ func (s *Service) Start(
 		s.syncStateProvider = syncStateProvider
 	}
 
-	s.syncHandler = syncservice.NewHandler(syncRegulator, s.client, s.identityState.UserID(), s.syncStateProvider, s.log, s.panicHandler)
+	s.syncHandler = syncservice.NewHandler(
+		syncRegulator,
+		s.client,
+		s.identityState.UserID(),
+		s.syncStateProvider,
+		s.log,
+		s.panicHandler,
+		s.reporter)
 
 	// Get user labels
 	apiLabels, err := s.client.GetLabels(ctx, proton.LabelTypeSystem, proton.LabelTypeFolder, proton.LabelTypeLabel)
@@ -238,6 +245,12 @@ func (s *Service) OnBadEventResync(ctx context.Context) error {
 
 func (s *Service) OnLogout(ctx context.Context) error {
 	_, err := s.cpc.Send(ctx, &onLogoutReq{})
+
+	return err
+}
+
+func (s *Service) OnDelete(ctx context.Context) error {
+	_, err := s.cpc.Send(ctx, &onDeleteReq{})
 
 	return err
 }
@@ -358,6 +371,12 @@ func (s *Service) run(ctx context.Context) { //nolint gocyclo
 
 			case *onBadEventReq:
 				s.log.Debug("Bad Event Request")
+				// // Log remote label IDs stored in the local labelMap.
+				s.labels.LogLabels()
+				// Log the remote label IDs store in Gluon.
+				if err := s.logRemoteMailboxIDsFromServer(ctx, s.connectors); err != nil {
+					s.log.Warnf("Could not obtain remote mailbox IDs from server: %v", err)
+				}
 				err := s.removeConnectorsFromServer(ctx, s.connectors, false)
 				req.Reply(ctx, nil, err)
 
@@ -369,6 +388,11 @@ func (s *Service) run(ctx context.Context) { //nolint gocyclo
 			case *onLogoutReq:
 				s.log.Debug("Logout Request")
 				err := s.removeConnectorsFromServer(ctx, s.connectors, false)
+				req.Reply(ctx, nil, err)
+
+			case *onDeleteReq:
+				s.log.Debug("Delete Request")
+				err := s.removeConnectorsFromServer(ctx, s.connectors, true)
 				req.Reply(ctx, nil, err)
 
 			case *showAllMailReq:
@@ -513,10 +537,10 @@ func (s *Service) buildConnectors() (map[string]*Connector, error) {
 			s.addressMode,
 			s.sendRecorder,
 			s.panicHandler,
-			s.telemetry,
 			s.reporter,
 			s.showAllMail,
 			s.syncStateProvider,
+			s.serverManager,
 		)
 
 		return connectors, nil
@@ -531,10 +555,10 @@ func (s *Service) buildConnectors() (map[string]*Connector, error) {
 			s.addressMode,
 			s.sendRecorder,
 			s.panicHandler,
-			s.telemetry,
 			s.reporter,
 			s.showAllMail,
 			s.syncStateProvider,
+			s.serverManager,
 		)
 	}
 
@@ -570,6 +594,16 @@ func (s *Service) addConnectorsToServer(ctx context.Context, connectors map[stri
 	}
 
 	return nil
+}
+
+func (s *Service) logRemoteMailboxIDsFromServer(ctx context.Context, connectors map[string]*Connector) error {
+	addrIDs := make([]string, 0, len(connectors))
+
+	for _, c := range connectors {
+		addrIDs = append(addrIDs, c.addrID)
+	}
+
+	return s.serverManager.LogRemoteLabelIDs(ctx, s.gluonIDProvider, addrIDs...)
 }
 
 func (s *Service) removeConnectorsFromServer(ctx context.Context, connectors map[string]*Connector, deleteData bool) error {
@@ -635,12 +669,16 @@ func (s *Service) setShowAllMail(v bool) {
 
 func (s *Service) startSyncing() {
 	s.isSyncing.Store(true)
-	s.syncHandler.Execute(s.syncReporter, s.labels.GetLabelMap(), s.syncUpdateApplier, s.syncMessageBuilder, syncservice.DefaultRetryCoolDown)
+	s.syncHandler.Execute(s.syncReporter, s.labels.GetLabelMap(), s.syncUpdateApplier, s.syncMessageBuilder, syncservice.DefaultRetryCoolDown, s.LabelConflictChecker)
 }
 
 func (s *Service) cancelSync() {
 	s.syncHandler.CancelAndWait()
 	s.isSyncing.Store(false)
+}
+
+func (s *Service) getConnectors() []*Connector {
+	return maps.Values(s.connectors)
 }
 
 type resyncReq struct{}
@@ -654,6 +692,8 @@ type onBadEventResyncReq struct{}
 type onLogoutReq struct{}
 
 type showAllMailReq struct{ v bool }
+
+type onDeleteReq struct{}
 
 type setAddressModeReq struct {
 	mode usertypes.AddressMode

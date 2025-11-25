@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -30,9 +30,12 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/algo"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/restarter"
+	"github.com/elastic/go-sysinfo"
 	"github.com/getsentry/sentry-go"
 	"github.com/sirupsen/logrus"
 )
+
+const hostNotDetectedField = "not-detected"
 
 var skippedFunctions = []string{} //nolint:gochecknoglobals
 
@@ -70,15 +73,48 @@ func init() { //nolint:gochecknoinits
 	)
 }
 
+type hostInfoData struct {
+	hostArch    string
+	hostName    string
+	hostVersion string
+	hostBuild   string
+}
+
+func newHostInfoData() hostInfoData {
+	return hostInfoData{
+		hostArch:    hostNotDetectedField,
+		hostName:    hostNotDetectedField,
+		hostVersion: hostNotDetectedField,
+		hostBuild:   hostNotDetectedField,
+	}
+}
+
 type Reporter struct {
 	appName    string
 	appVersion string
 	identifier Identifier
-	hostArch   string
+	hostInfo   hostInfoData
 }
 
 type Identifier interface {
 	GetUserAgent() string
+}
+
+func getHostInfo() hostInfoData {
+	data := newHostInfoData()
+
+	host, err := sysinfo.Host()
+	if err != nil {
+		return data
+	}
+
+	data.hostArch = getHostArch(host)
+	osInfo := host.Info().OS
+	data.hostName = osInfo.Name
+	data.hostVersion = osInfo.Version
+	data.hostBuild = osInfo.Build
+
+	return data
 }
 
 func GetProtectedHostname() string {
@@ -100,7 +136,7 @@ func NewReporter(appName string, identifier Identifier) *Reporter {
 		appName:    appName,
 		appVersion: constants.Revision,
 		identifier: identifier,
-		hostArch:   getHostArch(),
+		hostInfo:   getHostInfo(),
 	}
 }
 
@@ -121,7 +157,7 @@ func (r *Reporter) ReportExceptionWithContext(i interface{}, context map[string]
 	SkipDuringUnwind()
 
 	err := fmt.Errorf("recover: %v", i)
-	return r.scopedReport(context, func() {
+	return r.scopedReport(context, func(_ *sentry.Scope) {
 		SkipDuringUnwind()
 		if eventID := sentry.CaptureException(err); eventID != nil {
 			logrus.WithError(err).
@@ -133,7 +169,20 @@ func (r *Reporter) ReportExceptionWithContext(i interface{}, context map[string]
 
 func (r *Reporter) ReportMessageWithContext(msg string, context map[string]interface{}) error {
 	SkipDuringUnwind()
-	return r.scopedReport(context, func() {
+	return r.scopedReport(context, func(_ *sentry.Scope) {
+		SkipDuringUnwind()
+		if eventID := sentry.CaptureMessage(msg); eventID != nil {
+			logrus.WithField("message", msg).
+				WithField("reportID", *eventID).
+				Warn("Captured message")
+		}
+	})
+}
+
+func (r *Reporter) ReportWarningWithContext(msg string, context map[string]interface{}) error {
+	SkipDuringUnwind()
+	return r.scopedReport(context, func(scope *sentry.Scope) {
+		scope.SetLevel(sentry.LevelWarning)
 		SkipDuringUnwind()
 		if eventID := sentry.CaptureMessage(msg); eventID != nil {
 			logrus.WithField("message", msg).
@@ -144,7 +193,7 @@ func (r *Reporter) ReportMessageWithContext(msg string, context map[string]inter
 }
 
 // Report reports a sentry crash with stacktrace from all goroutines.
-func (r *Reporter) scopedReport(context map[string]interface{}, doReport func()) error {
+func (r *Reporter) scopedReport(context map[string]interface{}, doReport func(scope *sentry.Scope)) error {
 	SkipDuringUnwind()
 
 	if os.Getenv("PROTONMAIL_ENV") == "dev" {
@@ -152,11 +201,14 @@ func (r *Reporter) scopedReport(context map[string]interface{}, doReport func())
 	}
 
 	tags := map[string]string{
-		"OS":        runtime.GOOS,
-		"Client":    r.appName,
-		"Version":   r.appVersion,
-		"UserAgent": r.identifier.GetUserAgent(),
-		"HostArch":  r.hostArch,
+		"OS":          runtime.GOOS,
+		"Client":      r.appName,
+		"Version":     r.appVersion,
+		"UserAgent":   r.identifier.GetUserAgent(),
+		"HostArch":    r.hostInfo.hostArch,
+		"HostName":    r.hostInfo.hostName,
+		"HostVersion": r.hostInfo.hostVersion,
+		"HostBuild":   r.hostInfo.hostBuild,
 	}
 
 	sentry.WithScope(func(scope *sentry.Scope) {
@@ -167,7 +219,7 @@ func (r *Reporter) scopedReport(context map[string]interface{}, doReport func())
 				map[string]sentry.Context{"bridge": contextToString(context)},
 			)
 		}
-		doReport()
+		doReport(scope)
 	})
 
 	if !sentry.Flush(time.Second * 10) {
@@ -247,4 +299,26 @@ func contextToString(context sentry.Context) sentry.Context {
 	}
 
 	return res
+}
+
+type NullSentryReporter struct{}
+
+func (n NullSentryReporter) ReportException(any) error {
+	return nil
+}
+
+func (n NullSentryReporter) ReportMessage(string) error {
+	return nil
+}
+
+func (n NullSentryReporter) ReportMessageWithContext(string, reporter.Context) error {
+	return nil
+}
+
+func (n NullSentryReporter) ReportWarningWithContext(string, reporter.Context) error {
+	return nil
+}
+
+func (n NullSentryReporter) ReportExceptionWithContext(any, reporter.Context) error {
+	return nil
 }

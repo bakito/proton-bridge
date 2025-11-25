@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -21,13 +21,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/ProtonMail/gluon/async"
 	"github.com/ProtonMail/gluon/reporter"
 	"github.com/ProtonMail/go-proton-api"
-	"github.com/ProtonMail/proton-bridge/v3/internal/configstatus"
 	"github.com/ProtonMail/proton-bridge/v3/internal/events"
 	"github.com/ProtonMail/proton-bridge/v3/internal/safe"
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/imapservice"
@@ -65,6 +63,8 @@ type User struct {
 	id  string
 	log *logrus.Entry
 
+	userPlan string
+
 	vault    *vault.User
 	client   *proton.Client
 	reporter reporter.Reporter
@@ -78,10 +78,7 @@ type User struct {
 	maxSyncMemory uint64
 
 	panicHandler     async.PanicHandler
-	configStatus     *configstatus.ConfigurationStatus
 	telemetryManager telemetry.Availability
-	// goStatusProgress triggers a check/sending if progress is needed.
-	goStatusProgress func()
 
 	eventService        *userevents.Service
 	identityService     *useridentity.Service
@@ -104,7 +101,6 @@ func New(
 	crashHandler async.PanicHandler,
 	showAllMail bool,
 	maxSyncMemory uint64,
-	statsDir string,
 	telemetryManager telemetry.Availability,
 	imapServerManager imapservice.IMAPServerManager,
 	smtpServerManager smtp.ServerManager,
@@ -114,7 +110,7 @@ func New(
 	syncConfigDir string,
 	isNew bool,
 	notificationStore *notifications.Store,
-	getFlagValFn unleash.GetFlagValueFn,
+	featureFlagValueProvider unleash.FeatureFlagValueProvider,
 ) (*User, error) {
 	user, err := newImpl(
 		ctx,
@@ -125,7 +121,6 @@ func New(
 		crashHandler,
 		showAllMail,
 		maxSyncMemory,
-		statsDir,
 		telemetryManager,
 		imapServerManager,
 		smtpServerManager,
@@ -135,7 +130,7 @@ func New(
 		syncConfigDir,
 		isNew,
 		notificationStore,
-		getFlagValFn,
+		featureFlagValueProvider,
 	)
 	if err != nil {
 		// Cleanup any pending resources on error
@@ -159,7 +154,6 @@ func newImpl(
 	crashHandler async.PanicHandler,
 	showAllMail bool,
 	maxSyncMemory uint64,
-	statsDir string,
 	telemetryManager telemetry.Availability,
 	imapServerManager imapservice.IMAPServerManager,
 	smtpServerManager smtp.ServerManager,
@@ -169,7 +163,7 @@ func newImpl(
 	syncConfigDir string,
 	isNew bool,
 	notificationStore *notifications.Store,
-	getFlagValueFn unleash.GetFlagValueFn,
+	featureFlagValueProvider unleash.FeatureFlagValueProvider,
 ) (*User, error) {
 	logrus.WithField("userID", apiUser.ID).Info("Creating new user")
 
@@ -182,6 +176,14 @@ func newImpl(
 	apiAddrs, err := client.GetAddresses(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get addresses: %w", err)
+	}
+
+	// Get the user's plan name.
+	var userPlan string
+	if organizationData, err := client.GetOrganizationData(ctx); err != nil {
+		logrus.WithError(err).Info("Failed to obtain user organization data")
+	} else {
+		userPlan = organizationData.Organization.PlanName
 	}
 
 	// Get the user's API labels.
@@ -198,18 +200,14 @@ func newImpl(
 		"numLabels": len(apiLabels),
 	}).Info("Creating user object")
 
-	configStatusFile := filepath.Join(statsDir, apiUser.ID+".json")
-	configStatus, err := configstatus.LoadConfigurationStatus(configStatusFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init configuration status file: %w", err)
-	}
-
 	sendRecorder := sendrecorder.NewSendRecorder(sendrecorder.SendEntryExpiry)
 
 	// Create the user object.
 	user := &User{
 		log: logrus.WithField("userID", apiUser.ID),
 		id:  apiUser.ID,
+
+		userPlan: userPlan,
 
 		vault:    encVault,
 		client:   client,
@@ -225,7 +223,6 @@ func newImpl(
 
 		panicHandler: crashHandler,
 
-		configStatus:     configStatus,
 		telemetryManager: telemetryManager,
 
 		serviceGroup: orderedtasks.NewOrderedCancelGroup(crashHandler),
@@ -244,11 +241,12 @@ func newImpl(
 		5*time.Minute,
 		crashHandler,
 		eventSubscription,
+		reporter,
 	)
 
 	addressMode := usertypes.VaultToAddressMode(encVault.AddressMode())
 
-	user.identityService = useridentity.NewService(user.eventService, user, identityState, encVault, user)
+	user.identityService = useridentity.NewService(user.eventService, user, identityState, encVault)
 
 	user.telemetryService = telemetryservice.NewService(apiUser.ID, client, user.eventService)
 
@@ -260,11 +258,13 @@ func newImpl(
 		reporter,
 		encVault,
 		encVault,
-		user,
 		user.eventService,
 		addressMode,
 		identityState.Clone(),
 		smtpServerManager,
+		observabilityService,
+		imapServerManager,
+		featureFlagValueProvider,
 	)
 
 	user.imapService = imapservice.NewService(
@@ -278,7 +278,6 @@ func newImpl(
 		encVault,
 		crashHandler,
 		sendRecorder,
-		user,
 		reporter,
 		addressMode,
 		eventSubscription,
@@ -286,15 +285,10 @@ func newImpl(
 		user.maxSyncMemory,
 		showAllMail,
 		observabilityService,
+		featureFlagValueProvider,
 	)
 
-	user.notificationService = notifications.NewService(user.id, user.eventService, user, notificationStore, getFlagValueFn, observabilityService)
-
-	// Check for status_progress when triggered.
-	user.goStatusProgress = user.tasks.PeriodicOrTrigger(configstatus.ProgressCheckInterval, 0, func(ctx context.Context) {
-		user.SendConfigStatusProgress(ctx)
-	})
-	defer user.goStatusProgress()
+	user.notificationService = notifications.NewService(user.id, user.eventService, user, notificationStore, featureFlagValueProvider, observabilityService)
 
 	// When we receive an auth object, we update it in the vault.
 	// This will be used to authorize the user on the next run.
@@ -339,7 +333,7 @@ func newImpl(
 	user.identityService.Start(ctx, user.serviceGroup)
 
 	// Add user client to observability service
-	observabilityService.RegisterUserClient(user.id, client, user.telemetryService)
+	observabilityService.RegisterUserClient(user.id, client, user.telemetryService, userPlan)
 
 	// Start Notification service
 	user.notificationService.Start(ctx, user.serviceGroup)
@@ -436,6 +430,11 @@ func (user *User) Emails() []string {
 // GetAddressMode returns the user's current address mode.
 func (user *User) GetAddressMode() vault.AddressMode {
 	return user.vault.AddressMode()
+}
+
+// GetUserPlanName returns the user's subscription plan name.
+func (user *User) GetUserPlanName() string {
+	return user.userPlan
 }
 
 // SetAddressMode sets the user's address mode.
@@ -597,8 +596,13 @@ func (user *User) CheckAuth(email string, password []byte) (string, error) {
 }
 
 // Logout logs the user out from the API.
-func (user *User) Logout(ctx context.Context, withAPI bool) error {
-	user.log.WithField("withAPI", withAPI).Info("Logging out user")
+func (user *User) Logout(ctx context.Context, withAPI, withData, withDataDisabledKillSwitch bool) error {
+	user.log.WithFields(
+		logrus.Fields{
+			"withAPI":                    withAPI,
+			"withData":                   withData,
+			"withDataDisabledKillSwitch": withDataDisabledKillSwitch,
+		}).Info("Logging out user")
 
 	user.log.Debug("Canceling ongoing tasks")
 
@@ -606,8 +610,20 @@ func (user *User) Logout(ctx context.Context, withAPI bool) error {
 		return fmt.Errorf("failed to remove user from smtp server: %w", err)
 	}
 
-	if err := user.imapService.OnLogout(ctx); err != nil {
-		return fmt.Errorf("failed to remove user from imap server: %w", err)
+	if withData && !withDataDisabledKillSwitch {
+		if err := user.imapService.OnDelete(ctx); err != nil {
+			if rerr := user.reporter.ReportMessageWithContext("Failed to delete user IMAP data", map[string]any{
+				"error": err.Error(),
+			}); rerr != nil {
+				logrus.WithError(rerr).Info("Failed to report user IMAP deletion issue to Sentry")
+			}
+
+			return fmt.Errorf("failed to delete user from imap server: %w", err)
+		}
+	} else {
+		if err := user.imapService.OnLogout(ctx); err != nil {
+			return fmt.Errorf("failed to remove user from imap server: %w", err)
+		}
 	}
 
 	user.tasks.CancelAndWait()
@@ -697,19 +713,6 @@ func (user *User) SendTelemetry(ctx context.Context, data []byte) error {
 	return nil
 }
 
-func (user *User) ReportSMTPAuthFailed(username string) {
-	emails := user.Emails()
-	for _, mail := range emails {
-		if mail == username {
-			user.ReportConfigStatusFailure("SMTP invalid username or password")
-		}
-	}
-}
-
-func (user *User) ReportSMTPAuthSuccess(ctx context.Context) {
-	user.SendConfigStatusSuccess(ctx)
-}
-
 func (user *User) GetSMTPService() *smtp.Service {
 	return user.smtpService
 }
@@ -740,7 +743,7 @@ func (user *User) protonAddresses() []proton.Address {
 	}
 
 	addresses := xslices.Filter(maps.Values(apiAddrs), func(addr proton.Address) bool {
-		return addr.Status == proton.AddressStatusEnabled && addr.Type != proton.AddressTypeExternal
+		return addr.Status == proton.AddressStatusEnabled && (addr.IsBYOEAddress() || addr.Type != proton.AddressTypeExternal)
 	})
 
 	slices.SortFunc(addresses, func(a, b proton.Address) bool {

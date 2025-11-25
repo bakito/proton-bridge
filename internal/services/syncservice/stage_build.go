@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -114,7 +114,7 @@ func (b *BuildStage) run(ctx context.Context) {
 				messages: nil,
 			}); err != nil {
 				err = fmt.Errorf("failed to produce output for next stage: %w", err)
-				logrus.Errorf(err.Error())
+				logrus.Error(err.Error())
 				req.job.onError(err)
 			}
 
@@ -217,7 +217,7 @@ func chunkSyncBuilderBatch(batch []proton.FullMessage, maxMemory uint64) [][]pro
 	for _, v := range batch {
 		var dataSize uint64
 		for _, a := range v.Attachments {
-			dataSize += uint64(a.Size)
+			dataSize += uint64(a.Size) //nolint:gosec // disable G115
 		}
 
 		// 2x increase for attachment due to extra memory needed for decrypting and writing

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -18,6 +18,8 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path"
 
@@ -25,17 +27,18 @@ import (
 	"github.com/ProtonMail/proton-bridge/v3/internal/certs"
 	"github.com/ProtonMail/proton-bridge/v3/internal/constants"
 	"github.com/ProtonMail/proton-bridge/v3/internal/locations"
+	"github.com/ProtonMail/proton-bridge/v3/internal/sentry"
 	"github.com/ProtonMail/proton-bridge/v3/internal/vault"
 	"github.com/ProtonMail/proton-bridge/v3/pkg/keychain"
 	"github.com/sirupsen/logrus"
 )
 
-func WithVault(locations *locations.Locations, keychains *keychain.List, panicHandler async.PanicHandler, fn func(*vault.Vault, bool, bool) error) error {
+func WithVault(reporter *sentry.Reporter, locations *locations.Locations, keychains *keychain.List, panicHandler async.PanicHandler, fn func(*vault.Vault, bool, bool) error) error {
 	logrus.Debug("Creating vault")
 	defer logrus.Debug("Vault stopped")
 
 	// Create the encVault.
-	encVault, insecure, corrupt, err := newVault(locations, keychains, panicHandler)
+	encVault, insecure, corrupt, err := newVault(reporter, locations, keychains, panicHandler)
 	if err != nil {
 		return fmt.Errorf("could not create vault: %w", err)
 	}
@@ -57,7 +60,7 @@ func WithVault(locations *locations.Locations, keychains *keychain.List, panicHa
 	return fn(encVault, insecure, corrupt != nil)
 }
 
-func newVault(locations *locations.Locations, keychains *keychain.List, panicHandler async.PanicHandler) (*vault.Vault, bool, error, error) {
+func newVault(reporter *sentry.Reporter, locations *locations.Locations, keychains *keychain.List, panicHandler async.PanicHandler) (*vault.Vault, bool, error, error) {
 	vaultDir, err := locations.ProvideSettingsPath()
 	if err != nil {
 		return nil, false, nil, fmt.Errorf("could not get vault dir: %w", err)
@@ -66,11 +69,22 @@ func newVault(locations *locations.Locations, keychains *keychain.List, panicHan
 	logrus.WithField("vaultDir", vaultDir).Debug("Loading vault from directory")
 
 	var (
-		vaultKey []byte
-		insecure bool
+		vaultKey       []byte
+		insecure       bool
+		lastUsedHelper string
 	)
 
-	if key, err := loadVaultKey(vaultDir, keychains); err != nil {
+	if key, helper, err := loadVaultKey(vaultDir, keychains); err != nil {
+		if reporter != nil {
+			if rerr := reporter.ReportMessageWithContext("Could not load/create vault key", map[string]any{
+				"keychainDefaultHelper":       keychains.GetDefaultHelper(),
+				"keychainUsableHelpersLength": len(keychains.GetHelpers()),
+				"error":                       err.Error(),
+			}); rerr != nil {
+				logrus.WithError(err).Info("Failed to report keychain issue to Sentry")
+			}
+		}
+
 		logrus.WithError(err).Error("Could not load/create vault key")
 		insecure = true
 
@@ -78,6 +92,8 @@ func newVault(locations *locations.Locations, keychains *keychain.List, panicHan
 		vaultDir = path.Join(vaultDir, "insecure")
 	} else {
 		vaultKey = key
+		lastUsedHelper = helper
+		logHashedVaultKey(vaultKey) // Log a hash of the vault key.
 	}
 
 	gluonCacheDir, err := locations.ProvideGluonCachePath()
@@ -85,34 +101,47 @@ func newVault(locations *locations.Locations, keychains *keychain.List, panicHan
 		return nil, false, nil, fmt.Errorf("could not provide gluon path: %w", err)
 	}
 
-	vault, corrupt, err := vault.New(vaultDir, gluonCacheDir, vaultKey, panicHandler)
+	userVault, corrupt, err := vault.New(vaultDir, gluonCacheDir, vaultKey, panicHandler)
 	if err != nil {
 		return nil, false, corrupt, fmt.Errorf("could not create vault: %w", err)
 	}
 
-	return vault, insecure, corrupt, nil
+	// Remember the last successfully used keychain and store that as the user preference.
+	if err := vault.SetHelper(vaultDir, lastUsedHelper); err != nil {
+		logrus.WithError(err).Error("Could not store last used keychain helper")
+	}
+
+	return userVault, insecure, corrupt, nil
 }
 
-func loadVaultKey(vaultDir string, keychains *keychain.List) ([]byte, error) {
-	helper, err := vault.GetHelper(vaultDir)
+// loadVaultKey - loads the key used to encrypt the vault alongside the keychain helper used to access it.
+func loadVaultKey(vaultDir string, keychains *keychain.List) (key []byte, keychainHelper string, err error) {
+	keychainHelper, err = vault.GetHelper(vaultDir)
 	if err != nil {
-		return nil, fmt.Errorf("could not get keychain helper: %w", err)
+		return nil, keychainHelper, fmt.Errorf("could not get keychain helper: %w", err)
 	}
 
-	kc, err := keychain.NewKeychain(helper, constants.KeyChainName, keychains.GetHelpers(), keychains.GetDefaultHelper())
+	kc, keychainHelper, err := keychain.NewKeychain(keychainHelper, constants.KeyChainName, keychains.GetHelpers(), keychains.GetDefaultHelper())
 	if err != nil {
-		return nil, fmt.Errorf("could not create keychain: %w", err)
+		return nil, keychainHelper, fmt.Errorf("could not create keychain: %w", err)
 	}
 
-	key, err := vault.GetVaultKey(kc)
+	key, err = vault.GetVaultKey(kc)
 	if err != nil {
 		if keychain.IsErrKeychainNoItem(err) {
 			logrus.WithError(err).Warn("no vault key found, generating new")
-			return vault.NewVaultKey(kc)
+			key, err := vault.NewVaultKey(kc)
+			return key, keychainHelper, err
 		}
 
-		return nil, fmt.Errorf("could not check for vault key: %w", err)
+		return nil, keychainHelper, fmt.Errorf("could not check for vault key: %w", err)
 	}
 
-	return key, nil
+	return key, keychainHelper, nil
+}
+
+// logHashedVaultKey - computes a sha256 hash and encodes it to base 64. The resulting string is logged.
+func logHashedVaultKey(vaultKey []byte) {
+	hashedKey := sha256.Sum256(vaultKey)
+	logrus.WithField("hashedKey", hex.EncodeToString(hashedKey[:])).Info("Found vault key")
 }

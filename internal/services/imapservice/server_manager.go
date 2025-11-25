@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 //
 // This file is part of Proton Mail Bridge.
 //
@@ -21,6 +21,7 @@ import (
 	"context"
 
 	"github.com/ProtonMail/gluon/connector"
+	"github.com/ProtonMail/gluon/imap"
 	"github.com/ProtonMail/proton-bridge/v3/internal/services/syncservice"
 )
 
@@ -34,6 +35,16 @@ type IMAPServerManager interface {
 	) error
 
 	RemoveIMAPUser(ctx context.Context, deleteData bool, provider GluonIDProvider, addrID ...string) error
+
+	LogRemoteLabelIDs(ctx context.Context, provider GluonIDProvider, addrID ...string) error
+
+	GetUserMailboxByName(ctx context.Context, addrID string, mailboxName []string) (imap.MailboxData, error)
+
+	GetUserMailboxCountByInternalID(ctx context.Context, addrID string, internalID imap.InternalMailboxID) (int, error)
+
+	GetOpenIMAPSessionCount() int
+
+	GetRollingIMAPConnectionCount() int
 }
 
 type NullIMAPServerManager struct{}
@@ -55,6 +66,30 @@ func (n NullIMAPServerManager) RemoveIMAPUser(
 	_ ...string,
 ) error {
 	return nil
+}
+
+func (n NullIMAPServerManager) LogRemoteLabelIDs(
+	_ context.Context,
+	_ GluonIDProvider,
+	_ ...string,
+) error {
+	return nil
+}
+
+func (n NullIMAPServerManager) GetUserMailboxByName(_ context.Context, _ string, _ []string) (imap.MailboxData, error) {
+	return imap.MailboxData{}, nil
+}
+
+func (n NullIMAPServerManager) GetUserMailboxCountByInternalID(_ context.Context, _ string, _ imap.InternalMailboxID) (int, error) {
+	return 0, nil
+}
+
+func (n NullIMAPServerManager) GetOpenIMAPSessionCount() int {
+	return 0
+}
+
+func (n NullIMAPServerManager) GetRollingIMAPConnectionCount() int {
+	return 0
 }
 
 func NewNullIMAPServerManager() *NullIMAPServerManager {

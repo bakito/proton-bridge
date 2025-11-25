@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Proton AG
+// Copyright (c) 2025 Proton AG
 // This file is part of Proton Mail Bridge.
 // Proton Mail Bridge is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -51,7 +51,7 @@ Item {
                 color: colorScheme.text_weak
                 colorScheme: wizard.colorScheme
                 horizontalAlignment: Text.AlignHCenter
-                text: qsTr("A system pop-up will appear. Double click on the entry with your email, and click ’Install’ in the dialog that appears.")
+                text: qsTr("A series of pop-ups will appear. Follow the instructions to install the profile.")
                 type: Label.LabelType.Body
                 wrapMode: Text.WordWrap
             }
